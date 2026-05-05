@@ -41,14 +41,14 @@
   $: cumOtMs = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours)
 
   // ── Platform state ───────────────────────────────────────────
-  function platformState(platform) {
-    const pl = todayLogs.filter(l => l.platform === platform)
+  function platformState(platform, todayLogsArray) {
+    const pl = todayLogsArray.filter(l => l.platform === platform)
     if (!pl.length) return 'idle'
     return pl[pl.length - 1].action === 'resume' ? 'live' : 'paused'
   }
-  function platformNetMs(platform) {
-    const pl = todayLogs.filter(l => l.platform === platform).sort(byTs)
-    return computeNetMs(pl, platformState(platform) === 'live' ? now : null)
+  function platformNetMs(platform, todayLogsArray, currentTime) {
+    const pl = todayLogsArray.filter(l => l.platform === platform).sort(byTs)
+    return computeNetMs(pl, platformState(platform, todayLogsArray) === 'live' ? currentTime : null)
   }
 
   // ── Button press handler ─────────────────────────────────────
@@ -130,8 +130,8 @@
   <section class="section">
     <div class="platforms">
       {#each ['office', 'home'] as platform}
-        {@const state = platformState(platform)}
-        {@const netMs = platformNetMs(platform)}
+        {@const state = platformState(platform, todayLogs)}
+        {@const netMs = platformNetMs(platform, todayLogs, now)}
         <div class="platform-card platform--{platform}">
           <div class="platform-header">
             <span class="platform-icon">{platform === 'office' ? '🏢' : '🏠'}</span>
