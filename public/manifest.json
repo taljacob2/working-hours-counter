@@ -1,0 +1,16 @@
+{
+  "name": "Work Hours Logger",
+  "short_name": "Work Hours",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f2",
+  "theme_color": "#01696f",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
