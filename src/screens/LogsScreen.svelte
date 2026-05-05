@@ -63,7 +63,10 @@
   }
   function cancelEdit() { editingLogId.set(null); editForm = null }
 
+  let isSaving = false
+
   async function saveEdit() {
+    isSaving = true
     const sb = getSupabase()
     const updated = {
       timestamp:  new Date(editForm.timestamp).toISOString(),
@@ -73,6 +76,7 @@
       date_key:   editForm.timestamp.slice(0,10),
     }
     const { error } = await sb.from('work_logs').update(updated).eq('id', editForm.id)
+    isSaving = false
     if (error) { showToast('Update failed: ' + error.message, 'error'); return }
     logs.update(ls => ls.map(l => l.id === editForm.id ? { ...l, ...updated } : l))
     showToast('Log updated', 'success')
@@ -80,9 +84,11 @@
   }
 
   async function deleteLog() {
-    if (!confirm('Delete this log entry?')) return
+    if (!window.confirm('Delete this log entry?')) return
+    isSaving = true
     const sb = getSupabase()
     const { error } = await sb.from('work_logs').delete().eq('id', editForm.id)
+    isSaving = false
     if (error) { showToast('Delete failed: ' + error.message, 'error'); return }
     logs.update(ls => ls.filter(l => l.id !== editForm.id))
     showToast('Log deleted', 'info')
@@ -241,9 +247,9 @@
           <textarea id="edit-note" rows="2" bind:value={editForm.note} placeholder="Optional note…"></textarea>
         </div>
         <div class="edit-actions">
-          <button class="btn btn-primary" on:click={saveEdit}>💾 Save</button>
-          <button class="btn btn-secondary" on:click={cancelEdit}>Cancel</button>
-          <button class="btn btn-danger" on:click={deleteLog}>🗑 Delete</button>
+          <button class="btn btn-primary" on:click={saveEdit} disabled={isSaving}>💾 Save</button>
+          <button class="btn btn-secondary" on:click={cancelEdit} disabled={isSaving}>Cancel</button>
+          <button class="btn btn-danger" on:click={deleteLog} disabled={isSaving}>🗑 Delete</button>
         </div>
       </div>
     {/if}
