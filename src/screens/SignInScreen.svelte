@@ -15,9 +15,15 @@
     const { data, error: err } = await sb.auth.signInWithPassword({ email, password })
     if (err) { error = err.message; busy = false; return }
     user.set(data.user)
-    await loadAll(sb)
-    screen.set('main')
-    busy = false
+    
+    try {
+      await loadAll(sb)
+      screen.set('main')
+    } catch (e) {
+      error = e.message || 'Failed to load data after sign in.'
+    } finally {
+      busy = false
+    }
   }
 
   async function loadAll(sb) {

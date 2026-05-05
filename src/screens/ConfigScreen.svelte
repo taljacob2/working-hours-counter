@@ -28,7 +28,12 @@ create table public.work_settings (
 );
 alter table public.work_settings enable row level security;
 create policy "Auth users full access" on public.work_settings
-  for all to authenticated using (true) with check (true);`
+  for all to authenticated using (true) with check (true);
+
+-- Grant explicit permissions
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.work_logs to anon, authenticated;
+grant select, insert, update, delete on table public.work_settings to anon, authenticated;`
 
   let copied = false
   function copySQL() {

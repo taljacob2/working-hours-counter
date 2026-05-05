@@ -44,3 +44,10 @@ create policy "Auth users full access"
   to authenticated
   using (true)
   with check (true);
+
+-- ============================================================
+
+-- 3. Explicit permissions (fixes "permission denied" errors)
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.work_logs to anon, authenticated;
+grant select, insert, update, delete on table public.work_settings to anon, authenticated;

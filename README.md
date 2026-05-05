@@ -21,7 +21,7 @@ A personal work-hours tracking app built with **Svelte + Supabase**, deployed to
 ### 1. Create a Supabase project
 
 1. Go to [supabase.com](https://supabase.com) and create a free project.
-2. Open **SQL Editor** and run [`supabase-schema.sql`](./supabase-schema.sql).
+2. Open **SQL Editor** and run the entire contents of [`supabase-schema.sql`](./supabase-schema.sql). *(This includes the table creations, RLS policies, and explicit `GRANT` permissions to prevent "permission denied" errors).*
 3. Go to **Authentication → Users** and create a user account for yourself.
 4. Go to **Project Settings → API** and copy:
    - **Project URL** — `https://xxxx.supabase.co`
