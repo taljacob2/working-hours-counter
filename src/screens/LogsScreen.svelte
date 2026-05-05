@@ -269,14 +269,23 @@
   }
   @media (max-width: 780px) {
     .logs-screen { 
-      grid-template-columns: 1fr; 
-      padding: 1rem;
-      gap: 1rem;
+      grid-template-columns: minmax(0, 1fr); 
+      padding: 0.25rem;
+      gap: 0.5rem;
+      overflow-x: hidden;
     }
     .cal-panel {
       position: relative !important;
       top: auto !important;
+      padding: 0.25rem;
     }
+    .cal-nav { gap: 0.25rem; }
+    .cal-nav .btn { padding: 0.25rem 0.5rem; }
+    .cal-grid { gap: 1px; }
+    .cal-cell { padding: 2px 0; min-height: 44px; min-width: 0; overflow: hidden; }
+    .cal-net, .cal-ot { font-size: 0.55rem; letter-spacing: -0.5px; white-space: nowrap; text-overflow: clip; max-width: 100%; text-align: center; }
+    .cal-day-num { font-size: 0.7rem; }
+    .cal-month-pills { gap: 0.125rem; }
   }
 
   /* Calendar */
