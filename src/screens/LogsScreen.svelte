@@ -268,7 +268,15 @@
     align-items: start;
   }
   @media (max-width: 780px) {
-    .logs-screen { grid-template-columns: 1fr; }
+    .logs-screen { 
+      grid-template-columns: 1fr; 
+      padding: 1rem;
+      gap: 1rem;
+    }
+    .cal-panel {
+      position: relative !important;
+      top: auto !important;
+    }
   }
 
   /* Calendar */
