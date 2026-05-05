@@ -86,4 +86,9 @@
   .app-body {
     min-height: calc(100dvh - 56px);
   }
+  @media (max-width: 600px) {
+    .app-body {
+      padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    }
+  }
 </style>
