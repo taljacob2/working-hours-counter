@@ -58,13 +58,17 @@
   }
 
   function reconfigure() {
+    if (import.meta.env.NEXT_PUBLIC_SUPABASE_URL) {
+      showToast('Config is locked to Environment Variables', 'info')
+      return
+    }
     localStorage.removeItem('whl_sb_url')
     localStorage.removeItem('whl_sb_key')
     screen.set('config')
   }
 
   const maskedUrl = (() => {
-    const raw = localStorage.getItem('whl_sb_url') || ''
+    const raw = import.meta.env.NEXT_PUBLIC_SUPABASE_URL || localStorage.getItem('whl_sb_url') || ''
     return raw.length > 30 ? raw.slice(0, 20) + '…' + raw.slice(-10) : raw
   })()
 </script>

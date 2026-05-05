@@ -19,9 +19,9 @@
     theme.set(savedTheme)
     document.documentElement.setAttribute('data-theme', savedTheme)
 
-    // Check Supabase config
-    const url = localStorage.getItem('whl_sb_url')
-    const key = localStorage.getItem('whl_sb_key')
+    // Check Supabase config (Env vars first, then localStorage)
+    const url = import.meta.env.NEXT_PUBLIC_SUPABASE_URL || localStorage.getItem('whl_sb_url')
+    const key = import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || localStorage.getItem('whl_sb_key')
     if (!url || !key) { screen.set('config'); return }
 
     // Init client
