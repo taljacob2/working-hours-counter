@@ -12,6 +12,7 @@
   onDestroy(() => clearInterval(ticker))
 
   const todayKey = dateKey()
+  let filterUnderMin = false
 
   // ── Calendar helpers ─────────────────────────────────────────
   const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -123,6 +124,15 @@
         <div class="cal-month-pills">
           <span class="pill pill-muted">{daysLogged}d logged</span>
           <span class="pill {cumOt >= 0 ? 'pill-ot-pos' : 'pill-ot-neg'}">{fmtDuration(cumOt, true)} OT</span>
+          <button 
+            class="pill {filterUnderMin ? 'pill-ot-neg' : 'pill-muted'}" 
+            style="cursor: pointer; border: 1.5px solid transparent;" 
+            class:active-filter={filterUnderMin}
+            on:click={() => filterUnderMin = !filterUnderMin}
+            title="Filter by under minimum"
+          >
+            ⚠ Filter Under Min
+          </button>
         </div>
       </div>
       <div class="cal-nav-right">
@@ -146,6 +156,7 @@
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
             class:cal-cell--under-min={cell.underMin}
+            class:cal-cell--filtered-out={filterUnderMin && !cell.underMin}
             on:click={() => selectedDate.set(cell.key)}
           >
             <span class="cal-day-num">{cell.d}</span>
@@ -318,6 +329,8 @@
   .cal-cell--ot-pos { border-left: 3px solid var(--color-ot-pos); }
   .cal-cell--ot-neg { border-left: 3px solid var(--color-ot-neg); }
   .cal-cell--under-min { box-shadow: inset 0 0 0 1.5px var(--color-ot-neg); }
+  .cal-cell--filtered-out { opacity: 0.15; pointer-events: none; }
+  .active-filter { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
   .cal-day-num { font-size: 0.8rem; font-weight: 600; }
   .cal-net { font-size: 0.65rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .cal-ot { font-size: 0.65rem; font-weight: 600; font-variant-numeric: tabular-nums; }
