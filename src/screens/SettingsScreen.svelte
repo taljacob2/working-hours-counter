@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -7,16 +7,28 @@
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
 
+  let minHoursLocal = 5
+  minimumDailyHours.subscribe(v => minHoursLocal = v)
+
   // Sync slider ↔ number input
-  function onSlider(e)  { reqHoursLocal = parseFloat(e.target.value) }
-  function onNumber(e)  { reqHoursLocal = Math.min(14, Math.max(4, parseFloat(e.target.value) || 9)) }
+  function onReqSlider(e)  { reqHoursLocal = parseFloat(e.target.value) }
+  function onReqNumber(e)  { reqHoursLocal = Math.min(14, Math.max(4, parseFloat(e.target.value) || 9)) }
+
+  function onMinSlider(e)  { minHoursLocal = parseFloat(e.target.value) }
+  function onMinNumber(e)  { minHoursLocal = Math.min(14, Math.max(1, parseFloat(e.target.value) || 5)) }
 
   async function saveSettings() {
     requiredHours.set(reqHoursLocal)
     localStorage.setItem('whl_req_hours', String(reqHoursLocal))
+
+    minimumDailyHours.set(minHoursLocal)
+    localStorage.setItem('whl_min_hours', String(minHoursLocal))
+
     const sb = getSupabase()
-    const { error } = await sb.from('work_settings')
-      .upsert({ key: 'requiredDailyHours', value: String(reqHoursLocal) })
+    const { error } = await sb.from('work_settings').upsert([
+      { key: 'requiredDailyHours', value: String(reqHoursLocal) },
+      { key: 'minimumDailyHours', value: String(minHoursLocal) }
+    ])
     if (error) showToast('Settings save failed: ' + error.message, 'error')
     else showToast('Settings saved ✓', 'success')
   }
@@ -76,21 +88,44 @@
 <div class="settings-screen">
   <h1 class="page-title">Settings</h1>
 
-  <!-- Required Hours -->
+  <!-- Daily Hours Targets -->
   <div class="card">
-    <p class="section-title">Required Daily Hours</p>
-    <div class="hours-row">
-      <input id="req-slider" type="range" min="4" max="14" step="0.5"
-        bind:value={reqHoursLocal} on:input={onSlider}
-        style="flex:1"
-      />
-      <input id="req-num" type="number" min="4" max="14" step="0.5"
-        bind:value={reqHoursLocal} on:input={onNumber}
-        style="width:80px"
-      />
-      <span class="hours-label">h / day</span>
+    <p class="section-title">Daily Hours Targets</p>
+    
+    <div style="margin-bottom: 1.5rem">
+      <label>Required Daily Hours</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="req-slider" type="range" min="4" max="14" step="0.5"
+          bind:value={reqHoursLocal} on:input={onReqSlider}
+          style="flex:1"
+        />
+        <input id="req-num" type="number" min="4" max="14" step="0.5"
+          bind:value={reqHoursLocal} on:input={onReqNumber}
+          style="width:80px"
+        />
+        <span class="hours-label">h / day</span>
+      </div>
     </div>
-    <button class="btn btn-primary" style="margin-top:1rem" on:click={saveSettings}>
+
+    <div>
+      <label>Minimum Daily Hours</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="min-slider" type="range" min="1" max="14" step="0.5"
+          bind:value={minHoursLocal} on:input={onMinSlider}
+          style="flex:1"
+        />
+        <input id="min-num" type="number" min="1" max="14" step="0.5"
+          bind:value={minHoursLocal} on:input={onMinNumber}
+          style="width:80px"
+        />
+        <span class="hours-label">h / day</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        A warning will be shown on any day you log time but fall short of this minimum.
+      </p>
+    </div>
+
+    <button class="btn btn-primary" style="margin-top:1.5rem" on:click={saveSettings}>
       💾 Save settings
     </button>
 

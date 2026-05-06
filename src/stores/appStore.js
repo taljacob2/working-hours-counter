@@ -7,6 +7,7 @@ export const user = writable(null)
 // ── Data ──────────────────────────────────────────────────────
 export const logs = writable([])
 export const requiredHours = writable(9)
+export const minimumDailyHours = writable(5)
 
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')

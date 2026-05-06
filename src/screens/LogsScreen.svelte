@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
-  import { requiredHours } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -12,6 +12,7 @@
   onDestroy(() => clearInterval(ticker))
 
   const todayKey = dateKey()
+  let filterUnderMin = false
 
   // ── Calendar helpers ─────────────────────────────────────────
   const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -35,10 +36,12 @@
       const isOpen = dl.length > 0 && dl.at(-1).action === 'resume'
       const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? now : (isOpen ? null : null))
       const reqMs  = $requiredHours * 3_600_000
+      const minMs  = $minimumDailyHours * 3_600_000
       const otMs   = dl.length > 0 ? netMs - reqMs : null
       const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? now : null)
       const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? now : null)
-      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs })
+      const underMin = netMs > 0 && netMs < minMs
+      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin })
     }
     return cells
   }
@@ -121,6 +124,15 @@
         <div class="cal-month-pills">
           <span class="pill pill-muted">{daysLogged}d logged</span>
           <span class="pill {cumOt >= 0 ? 'pill-ot-pos' : 'pill-ot-neg'}">{fmtDuration(cumOt, true)} OT</span>
+          <button 
+            class="pill {filterUnderMin ? 'pill-ot-neg' : 'pill-muted'}" 
+            style="cursor: pointer; border: 1.5px solid transparent;" 
+            class:active-filter={filterUnderMin}
+            on:click={() => filterUnderMin = !filterUnderMin}
+            title="Filter by under minimum"
+          >
+            ⚠ Filter Under Min
+          </button>
         </div>
       </div>
       <div class="cal-nav-right">
@@ -143,6 +155,8 @@
             class:cal-cell--selected={cell.key === $selectedDate}
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
+            class:cal-cell--under-min={cell.underMin}
+            class:cal-cell--filtered-out={filterUnderMin && !cell.underMin}
             on:click={() => selectedDate.set(cell.key)}
           >
             <span class="cal-day-num">{cell.d}</span>
@@ -174,6 +188,12 @@
         </select>
       </div>
     </div>
+
+    {#if selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
+      <div class="min-hours-warning">
+        ⚠️ You logged <strong>{fmtDuration(selNetMs)}</strong>, which is below your minimum daily target of <strong>{$minimumDailyHours}h</strong>.
+      </div>
+    {/if}
 
     {#if $selectedDayLogs.length === 0}
       <div class="empty-state">No logs for this day.</div>
@@ -308,6 +328,9 @@
   .cal-cell--selected { border-color: var(--color-primary) !important; box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent); }
   .cal-cell--ot-pos { border-left: 3px solid var(--color-ot-pos); }
   .cal-cell--ot-neg { border-left: 3px solid var(--color-ot-neg); }
+  .cal-cell--under-min { box-shadow: inset 0 0 0 1.5px var(--color-ot-neg); }
+  .cal-cell--filtered-out { opacity: 0.15; pointer-events: none; }
+  .active-filter { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
   .cal-day-num { font-size: 0.8rem; font-weight: 600; }
   .cal-net { font-size: 0.65rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .cal-ot { font-size: 0.65rem; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -320,6 +343,11 @@
   h2 { font-size: 1.1rem; font-weight: 700; }
   .day-pills { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
   .res-select { width: auto; padding: 2px 8px; font-size: 0.8rem; min-height: 28px; }
+  .min-hours-warning {
+    padding: 0.75rem 1rem; border-radius: var(--radius-sm);
+    background: var(--color-ot-neg-subtle); color: var(--color-ot-neg);
+    font-size: 0.85rem; border: 1px solid color-mix(in srgb, var(--color-ot-neg) 30%, transparent);
+  }
   .empty-state { text-align: center; color: var(--color-text-muted); padding: 3rem 0; font-size: 0.9rem; }
 
   /* Log table */
