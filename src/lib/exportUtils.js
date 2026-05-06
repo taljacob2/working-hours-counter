@@ -3,7 +3,11 @@ export function exportCsv(logs, filename = 'work-logs.csv') {
   const header = cols.join(',')
   const rows = logs.map(l =>
     cols.map(c => {
-      const v = l[c] ?? ''
+      let v = l[c] ?? ''
+      if ((c === 'timestamp' || c === 'created_at') && v) {
+        // Convert the UTC string to a human-readable local time format
+        v = new Date(v).toLocaleString()
+      }
       return `"${String(v).replace(/"/g, '""')}"`
     }).join(',')
   )
