@@ -1,4 +1,4 @@
-export function exportCsv(logs, filename = 'work-logs.csv') {
+export function exportCsv(logs, filename = 'work-logs.csv', use24Hour = true) {
   const cols = ['id', 'date_key', 'timestamp', 'platform', 'action', 'created_at', 'note']
   const header = cols.join(',')
   const rows = logs.map(l =>
@@ -6,7 +6,7 @@ export function exportCsv(logs, filename = 'work-logs.csv') {
       let v = l[c] ?? ''
       if ((c === 'timestamp' || c === 'created_at') && v) {
         // Convert the UTC string to a human-readable local time format
-        v = new Date(v).toLocaleString()
+        v = new Date(v).toLocaleString([], { hour12: !use24Hour })
       }
       return `"${String(v).replace(/"/g, '""')}"`
     }).join(',')

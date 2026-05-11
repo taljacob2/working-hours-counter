@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, use24HourFormat } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -104,7 +104,7 @@
 
   // ── Format helpers ───────────────────────────────────────────
   function fmtTs(ts) {
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !$use24HourFormat })
   }
   function fmtDate(ts) {
     return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })

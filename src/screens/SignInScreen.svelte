@@ -1,6 +1,6 @@
 <script>
   import { getSupabase } from '../lib/supabase.js'
-  import { screen, user, logs, requiredHours, minimumDailyHours, loading, showToast } from '../stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, use24HourFormat, loading, showToast } from '../stores/appStore.js'
   import { byTs } from '../lib/timeUtils.js'
 
   let email = ''
@@ -37,9 +37,13 @@
       const { data: settings } = await sb.from('work_settings').select('key, value')
       const reqVal = settings?.find(s => s.key === 'requiredDailyHours')?.value
       const minVal = settings?.find(s => s.key === 'minimumDailyHours')?.value
+      const use24Val = settings?.find(s => s.key === 'use24HourFormat')?.value
 
       requiredHours.set(parseFloat(reqVal ?? localStorage.getItem('whl_req_hours') ?? '9'))
       minimumDailyHours.set(parseFloat(minVal ?? localStorage.getItem('whl_min_hours') ?? '5'))
+
+      const local24 = localStorage.getItem('whl_24h_format')
+      use24HourFormat.set(use24Val ? use24Val === 'true' : (local24 ? local24 === 'true' : true))
     } finally {
       loading.set(false)
     }

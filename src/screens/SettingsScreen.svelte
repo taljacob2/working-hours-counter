@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -9,6 +9,9 @@
 
   let minHoursLocal = 5
   minimumDailyHours.subscribe(v => minHoursLocal = v)
+
+  let use24Local = true
+  use24HourFormat.subscribe(v => use24Local = v)
 
   // Sync slider ↔ number input
   function onReqSlider(e)  { reqHoursLocal = parseFloat(e.target.value) }
@@ -24,10 +27,14 @@
     minimumDailyHours.set(minHoursLocal)
     localStorage.setItem('whl_min_hours', String(minHoursLocal))
 
+    use24HourFormat.set(use24Local)
+    localStorage.setItem('whl_24h_format', String(use24Local))
+
     const sb = getSupabase()
     const { error } = await sb.from('work_settings').upsert([
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
-      { key: 'minimumDailyHours', value: String(minHoursLocal) }
+      { key: 'minimumDailyHours', value: String(minHoursLocal) },
+      { key: 'use24HourFormat', value: String(use24Local) }
     ])
     if (error) showToast('Settings save failed: ' + error.message, 'error')
     else showToast('Settings saved ✓', 'success')
@@ -56,7 +63,7 @@
     const { start, end } = monthBounds(expYear, expMonth)
     const subset = $logs.filter(l => l.date_key >= start && l.date_key <= end)
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
-    exportCsv(subset, `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.csv`)
+    exportCsv(subset, `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.csv`, use24Local)
     showToast(`Exported ${subset.length} records`, 'success')
   }
 
@@ -88,9 +95,9 @@
 <div class="settings-screen">
   <h1 class="page-title">Settings</h1>
 
-  <!-- Daily Hours Targets -->
+  <!-- Preferences -->
   <div class="card">
-    <p class="section-title">Daily Hours Targets</p>
+    <p class="section-title">Preferences</p>
     
     <div style="margin-bottom: 1.5rem">
       <label>Required Daily Hours</label>
@@ -107,7 +114,7 @@
       </div>
     </div>
 
-    <div>
+    <div style="margin-bottom: 1.5rem">
       <label>Minimum Daily Hours</label>
       <div class="hours-row" style="margin-top: 0.25rem">
         <input id="min-slider" type="range" min="1" max="14" step="0.5"
@@ -123,6 +130,20 @@
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
         A warning will be shown on any day you log time but fall short of this minimum.
       </p>
+    </div>
+
+    <div>
+      <label>Time Format</label>
+      <div style="margin-top: 0.5rem; display: flex; gap: 1.5rem; align-items: center;">
+        <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer;">
+          <input type="radio" bind:group={use24Local} value={true} />
+          24-hour (14:30)
+        </label>
+        <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer;">
+          <input type="radio" bind:group={use24Local} value={false} />
+          12-hour (2:30 PM)
+        </label>
+      </div>
     </div>
 
     <button class="btn btn-primary" style="margin-top:1.5rem" on:click={saveSettings}>
