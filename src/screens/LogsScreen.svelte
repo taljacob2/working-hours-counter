@@ -62,6 +62,24 @@
       action:     log.action,
       note:       log.note || '',
       created_at: log.created_at,
+      isNew:      false
+    }
+  }
+
+  function startNewLog() {
+    editingLogId.set('new')
+    const selDate = new Date($selectedDate + 'T09:00:00')
+    // If it's today, maybe use current time?
+    const d = $selectedDate === todayKey ? new Date() : selDate
+    
+    editForm = {
+      id:         null,
+      timestamp:  new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16),
+      platform:   'office',
+      action:     'resume',
+      note:       '',
+      created_at: '(will be set on save)',
+      isNew:      true
     }
   }
   function cancelEdit() { editingLogId.set(null); editForm = null }
@@ -71,18 +89,27 @@
   async function saveEdit() {
     isSaving = true
     const sb = getSupabase()
-    const updated = {
+    const payload = {
       timestamp:  new Date(editForm.timestamp).toISOString(),
       platform:   editForm.platform,
       action:     editForm.action,
       note:       editForm.note,
       date_key:   editForm.timestamp.slice(0,10),
     }
-    const { error } = await sb.from('work_logs').update(updated).eq('id', editForm.id)
-    isSaving = false
-    if (error) { showToast('Update failed: ' + error.message, 'error'); return }
-    logs.update(ls => ls.map(l => l.id === editForm.id ? { ...l, ...updated } : l))
-    showToast('Log updated', 'success')
+
+    if (editForm.isNew) {
+      const { data, error } = await sb.from('work_logs').insert([payload]).select()
+      isSaving = false
+      if (error) { showToast('Save failed: ' + error.message, 'error'); return }
+      logs.update(ls => [...ls, data[0]])
+      showToast('Log added', 'success')
+    } else {
+      const { error } = await sb.from('work_logs').update(payload).eq('id', editForm.id)
+      isSaving = false
+      if (error) { showToast('Update failed: ' + error.message, 'error'); return }
+      logs.update(ls => ls.map(l => l.id === editForm.id ? { ...l, ...payload } : l))
+      showToast('Log updated', 'success')
+    }
     cancelEdit()
   }
 
@@ -186,6 +213,7 @@
           <option value="compact">Compact</option>
           <option value="full">Full</option>
         </select>
+        <button class="btn btn-sm btn-primary" on:click={startNewLog}>+ Add Log</button>
       </div>
     </div>
 
@@ -196,7 +224,10 @@
     {/if}
 
     {#if $selectedDayLogs.length === 0}
-      <div class="empty-state">No logs for this day.</div>
+      <div class="empty-state">
+        <p>No logs for this day.</p>
+        <button class="btn btn-primary" on:click={startNewLog}>Add your first log</button>
+      </div>
     {:else}
       <div class="log-table-wrap">
         <table class="log-table">
@@ -237,7 +268,7 @@
     <!-- Edit panel -->
     {#if editForm}
       <div class="edit-panel card">
-        <h3>Edit Log</h3>
+        <h3>{editForm.isNew ? 'Add New Log' : 'Edit Log'}</h3>
         <div class="edit-grid">
           <div class="field">
             <label for="edit-ts">Timestamp</label>
@@ -267,9 +298,13 @@
           <textarea id="edit-note" rows="2" bind:value={editForm.note} placeholder="Optional note…"></textarea>
         </div>
         <div class="edit-actions">
-          <button class="btn btn-primary" on:click={saveEdit} disabled={isSaving}>💾 Save</button>
+          <button class="btn btn-primary" on:click={saveEdit} disabled={isSaving}>
+            {editForm.isNew ? '➕ Create Log' : '💾 Save'}
+          </button>
           <button class="btn btn-secondary" on:click={cancelEdit} disabled={isSaving}>Cancel</button>
-          <button class="btn btn-danger" on:click={deleteLog} disabled={isSaving}>🗑 Delete</button>
+          {#if !editForm.isNew}
+            <button class="btn btn-danger" on:click={deleteLog} disabled={isSaving}>🗑 Delete</button>
+          {/if}
         </div>
       </div>
     {/if}
