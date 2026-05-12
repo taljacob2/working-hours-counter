@@ -98,7 +98,8 @@
     }
 
     if (editForm.isNew) {
-      const { data, error } = await sb.from('work_logs').insert([payload]).select()
+      const payloadWithId = { ...payload, id: crypto.randomUUID() }
+      const { data, error } = await sb.from('work_logs').insert([payloadWithId]).select()
       isSaving = false
       if (error) { showToast('Save failed: ' + error.message, 'error'); return }
       logs.update(ls => [...ls, data[0]])
