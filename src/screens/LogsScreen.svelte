@@ -50,6 +50,11 @@
   function nextMonth() { calCursor.update(c => new Date(c.getFullYear(), c.getMonth() + 1, 1)) }
   function goToday()   { calCursor.set(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); selectedDate.set(todayKey) }
 
+  function toLocalISO(date) {
+    const d = new Date(date)
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
+
   // ── Edit state ───────────────────────────────────────────────
   let editForm = null
 
@@ -57,7 +62,7 @@
     editingLogId.set(log.id)
     editForm = {
       id:         log.id,
-      timestamp:  log.timestamp.slice(0,16), // datetime-local format
+      timestamp:  toLocalISO(log.timestamp),
       platform:   log.platform,
       action:     log.action,
       note:       log.note || '',
@@ -74,7 +79,7 @@
     
     editForm = {
       id:         null,
-      timestamp:  new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16),
+      timestamp:  toLocalISO(d),
       platform:   'office',
       action:     'resume',
       note:       '',
