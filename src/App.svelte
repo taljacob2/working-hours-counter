@@ -50,11 +50,13 @@
       const reqVal = settings?.find(s => s.key === 'requiredDailyHours')?.value
       const minVal = settings?.find(s => s.key === 'minimumDailyHours')?.value
       const maxVal = settings?.find(s => s.key === 'maximumDailyHours')?.value
+      const gapVal = settings?.find(s => s.key === 'commuteGapMinutes')?.value
       const use24Val = settings?.find(s => s.key === 'use24HourFormat')?.value
 
       requiredHours.set(parseFloat(reqVal ?? localStorage.getItem('whl_req_hours') ?? '9'))
       minimumDailyHours.set(parseFloat(minVal ?? localStorage.getItem('whl_min_hours') ?? '5'))
       maximumDailyHours.set(parseFloat(maxVal ?? localStorage.getItem('whl_max_hours') ?? '12'))
+      commuteGapMinutes.set(parseInt(gapVal ?? localStorage.getItem('whl_commute_gap') ?? '45', 10))
       
       const local24 = localStorage.getItem('whl_24h_format')
       use24HourFormat.set(use24Val ? use24Val === 'true' : (local24 ? local24 === 'true' : true))

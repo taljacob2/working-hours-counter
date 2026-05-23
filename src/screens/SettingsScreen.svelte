@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -12,6 +12,9 @@
 
   let maxHoursLocal = 12
   maximumDailyHours.subscribe(v => maxHoursLocal = v)
+
+  let commuteGapLocal = 45
+  commuteGapMinutes.subscribe(v => commuteGapLocal = v)
 
   let use24Local = true
   use24HourFormat.subscribe(v => use24Local = v)
@@ -26,6 +29,9 @@
   function onMaxSlider(e)  { maxHoursLocal = parseFloat(e.target.value) }
   function onMaxNumber(e)  { maxHoursLocal = Math.min(24, Math.max(8, parseFloat(e.target.value) || 12)) }
 
+  function onGapSlider(e)  { commuteGapLocal = parseInt(e.target.value) }
+  function onGapNumber(e)  { commuteGapLocal = Math.min(180, Math.max(0, parseInt(e.target.value) || 45)) }
+
   async function saveSettings() {
     requiredHours.set(reqHoursLocal)
     localStorage.setItem('whl_req_hours', String(reqHoursLocal))
@@ -39,11 +45,15 @@
     use24HourFormat.set(use24Local)
     localStorage.setItem('whl_24h_format', String(use24Local))
 
+    commuteGapMinutes.set(commuteGapLocal)
+    localStorage.setItem('whl_commute_gap', String(commuteGapLocal))
+
     const sb = getSupabase()
     const { error } = await sb.from('work_settings').upsert([
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
       { key: 'minimumDailyHours', value: String(minHoursLocal) },
       { key: 'maximumDailyHours', value: String(maxHoursLocal) },
+      { key: 'commuteGapMinutes', value: String(commuteGapLocal) },
       { key: 'use24HourFormat', value: String(use24Local) }
     ])
     if (error) showToast('Settings save failed: ' + error.message, 'error')
@@ -160,6 +170,24 @@
       </div>
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
         The upper bound. Days where you exceed this are highlighted in the calendar and can be filtered.
+      </p>
+    </div>
+
+    <div style="margin-bottom: 1.5rem">
+      <label>Commute Gap Minutes</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="gap-slider" type="range" min="0" max="180" step="5"
+          bind:value={commuteGapLocal} on:input={onGapSlider}
+          style="flex:1"
+        />
+        <input id="gap-num" type="number" min="0" max="180" step="1"
+          bind:value={commuteGapLocal} on:input={onGapNumber}
+          style="width:80px"
+        />
+        <span class="hours-label">min</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        The required time gap between finishing at the office and starting at home. This gap is respected during rebalancing.
       </p>
     </div>
 

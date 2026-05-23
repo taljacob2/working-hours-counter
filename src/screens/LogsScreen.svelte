@@ -1,10 +1,10 @@
 <script>
   import { onDestroy } from 'svelte'
-  import { logs, selectedDate, calCursor, logResolution, editingLogId, selectedDayLogs, showToast } from '../stores/appStore.js'
+  import { user, logs, selectedDate, calCursor, logResolution, editingLogId, selectedDayLogs, showToast } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -147,6 +147,314 @@
 
   const MONTH_NAMES = ['January','February','March','April','May','June',
     'July','August','September','October','November','December']
+
+  // ── Rebalancing ──────────────────────────────────────────────
+  let showRebalancing = false
+
+  function fmtKeyShort(key) {
+    return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+  }
+
+  function suggestRebalancing(cells, minMs, maxMs, reqMs) {
+    // Mutable working copies — only logged days matter
+    const days = cells
+      .filter(c => c !== null && c.count > 0)
+      .map(c => ({ key: c.key, currentMs: c.netMs, offMs: c.offMs }))
+
+    const transfers = []
+
+    // Recipients: days below minimum, biggest deficit first
+    const recipients = days
+      .filter(d => d.currentMs > 0 && d.currentMs < minMs)
+      .sort((a, b) => a.currentMs - b.currentMs)
+
+    for (const rec of recipients) {
+      while (rec.currentMs < minMs) {
+        // Donor priority: above-max days (drain to max first), then OT days (drain to required)
+        const aboveMaxDonors = days
+          .filter(d => !d.tappedOut && d.currentMs > maxMs)
+          .sort((a, b) => b.currentMs - a.currentMs)
+        const otDonors = days
+          .filter(d => !d.tappedOut && d.currentMs > reqMs && d.currentMs <= maxMs)
+          .sort((a, b) => b.currentMs - a.currentMs)
+
+        const donor = aboveMaxDonors[0] || otDonors[0]
+        if (!donor) break
+
+        // Floor: drain above-max donors down to max; OT donors down to required
+        // CRITICAL: We cannot touch 'office' hours, so the donor can NEVER drop below their offMs
+        let floor = donor.currentMs > maxMs ? maxMs : reqMs
+        floor = Math.max(floor, donor.offMs)
+
+        const available = donor.currentMs - floor
+        if (available <= 0) {
+          // This donor is tapped out (all remaining surplus is locked in office hours)
+          donor.tappedOut = true // Prevent infinite loop
+          continue 
+        }
+
+        const needed = minMs - rec.currentMs
+        const transfer = Math.min(available, needed)
+
+        donor.currentMs -= transfer
+        rec.currentMs   += transfer
+        transfers.push({ from: donor.key, to: rec.key, ms: transfer })
+      }
+    }
+
+    const stillUnderMin  = days.filter(d => d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
+    const stillAboveMax  = days.filter(d => d.currentMs > maxMs).map(d => d.key)
+    const noViolations   = stillUnderMin.length === 0 && stillAboveMax.length === 0
+
+    return { transfers, stillUnderMin, stillAboveMax, noViolations }
+  }
+
+  $: rebalancing = showRebalancing
+    ? suggestRebalancing(
+        calDays.filter(Boolean),
+        $minimumDailyHours * 3_600_000,
+        $maximumDailyHours * 3_600_000,
+        $requiredHours    * 3_600_000
+      )
+    : null
+
+  // Per-cell delta map: key → net milliseconds shifted (negative = donated, positive = received)
+  $: rebalMap = (() => {
+    if (!rebalancing) return {}
+    const map = {}
+    for (const t of rebalancing.transfers) {
+      map[t.from] = (map[t.from] ?? 0) - t.ms
+      map[t.to]   = (map[t.to]   ?? 0) + t.ms
+    }
+    return map
+  })()
+
+  // Per-day summary for the redesigned panel
+  $: rebalSummary = (() => {
+    if (!rebalancing || !Object.keys(rebalMap).length) return { donors: [], recipients: [] }
+    const donors = [], recipients = []
+    for (const [key, deltaMs] of Object.entries(rebalMap)) {
+      const cell = calDays.find(c => c && c.key === key)
+      if (!cell) continue
+      const entry = { key, originalMs: cell.netMs, newMs: cell.netMs + deltaMs, deltaMs }
+      if (deltaMs < 0) donors.push(entry)
+      else             recipients.push(entry)
+    }
+    donors.sort((a, b) => a.deltaMs - b.deltaMs)       // biggest donor first
+    recipients.sort((a, b) => b.deltaMs - a.deltaMs)   // biggest recipient first
+    return { donors, recipients }
+  })()
+
+  // Per-day log adjustment suggestion
+  $: logAdjustmentSuggestion = (() => {
+    if (!showRebalancing || rebalMap[$selectedDate] == null || $selectedDayLogs.length === 0) return null
+    const deltaMs = rebalMap[$selectedDate]
+    if (deltaMs === 0) return null
+
+    const logsCopy = [...$selectedDayLogs].sort(byTs)
+
+    const homeLogs = logsCopy.filter(l => l.platform === 'home')
+    if (homeLogs.length === 0 && deltaMs > 0) {
+      // Need to create a new HOME block because there are none to extend
+      const lastLog = logsCopy[logsCopy.length - 1]
+      let startTs = new Date($selectedDate + 'T17:00:00').getTime()
+      if (lastLog) {
+        startTs = new Date(lastLog.timestamp).getTime()
+        if (lastLog.platform === 'office') {
+          startTs += ($commuteGapMinutes * 60_000)
+        }
+      }
+      
+      const limitTs = new Date($selectedDate + 'T23:59:59').getTime()
+      let endTs = startTs + deltaMs
+      let isPartialLocal = false
+      if (endTs > limitTs) {
+        endTs = limitTs
+        isPartialLocal = true
+      }
+      
+      if (endTs > startTs) {
+        return {
+          type: 'create_block',
+          newStartTs: new Date(startTs).toISOString(),
+          newEndTs: new Date(endTs).toISOString(),
+          deltaMs: endTs - startTs,
+          isPartial: isPartialLocal
+        }
+      }
+      return null
+    }
+
+    let targetLogId = null
+    let adjustmentMs = 0
+    let originalTs = null
+    let isPartial = false
+
+    if (deltaMs < 0) {
+      // Need to REDUCE time
+      const needed = -deltaMs
+      let bestLog = null
+      let maxReduction = 0
+      let targetMs = 0
+
+      for (let i = logsCopy.length - 1; i >= 0; i--) {
+        const log = logsCopy[i]
+        if (log.platform === 'home') {
+          if (log.action === 'pause') {
+            const prev = logsCopy[i - 1]
+            if (prev && prev.action === 'resume' && prev.platform === 'home') {
+              const minAllowedTs = new Date(prev.timestamp).getTime()
+              const curTs = new Date(log.timestamp).getTime()
+              const red = curTs - minAllowedTs
+              if (red >= needed) {
+                return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs - needed).toISOString(), deltaMs, isPartial: false }
+              }
+              if (red > maxReduction) {
+                maxReduction = red; bestLog = log; targetMs = -red
+              }
+            }
+          } else if (log.action === 'resume') {
+            const next = logsCopy[i + 1]
+            if (next && next.action === 'pause' && next.platform === 'home') {
+              const maxAllowedTs = new Date(next.timestamp).getTime()
+              const curTs = new Date(log.timestamp).getTime()
+              const red = maxAllowedTs - curTs
+              if (red >= needed) {
+                // To reduce duration, push resume LATER
+                return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs + needed).toISOString(), deltaMs, isPartial: false }
+              }
+              if (red > maxReduction) {
+                maxReduction = red; bestLog = log; targetMs = red
+              }
+            }
+          }
+        }
+      }
+      if (bestLog && maxReduction > 0) {
+        return { logId: bestLog.id, originalTs: bestLog.timestamp, newTs: new Date(new Date(bestLog.timestamp).getTime() + targetMs).toISOString(), deltaMs: targetMs, isPartial: true }
+      }
+    } else {
+      // Need to INCREASE time (push pause later, or pull resume earlier)
+      let bestLog = null
+      let maxIncrease = 0
+      let targetMs = 0
+
+      for (let i = logsCopy.length - 1; i >= 0; i--) {
+        const log = logsCopy[i]
+        if (log.platform === 'home') {
+          if (log.action === 'pause') {
+            const next = logsCopy[i + 1]
+            const curTs = new Date(log.timestamp).getTime()
+            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T23:59:59').getTime()
+            if (next) {
+              limitTs = new Date(next.timestamp).getTime()
+              if (next.platform === 'office') limitTs -= ($commuteGapMinutes * 60_000)
+            }
+            const inc = limitTs - curTs
+            if (inc >= deltaMs) {
+              return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs + deltaMs).toISOString(), deltaMs, isPartial: false }
+            }
+            if (inc > maxIncrease) {
+              maxIncrease = inc; bestLog = log; targetMs = inc
+            }
+          } else if (log.action === 'resume') {
+            const prev = logsCopy[i - 1]
+            const curTs = new Date(log.timestamp).getTime()
+            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T00:00:00').getTime()
+            if (prev) {
+              limitTs = new Date(prev.timestamp).getTime()
+              if (prev.platform === 'office') limitTs += ($commuteGapMinutes * 60_000)
+            }
+            const inc = curTs - limitTs
+            if (inc >= deltaMs) {
+              // Pull resume EARLIER
+              return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs - deltaMs).toISOString(), deltaMs, isPartial: false }
+            }
+            if (inc > maxIncrease) {
+              maxIncrease = inc; bestLog = log; targetMs = -inc // negative moves ts earlier
+            }
+          }
+        }
+      }
+      if (bestLog && maxIncrease > 0) {
+        return { logId: bestLog.id, originalTs: bestLog.timestamp, newTs: new Date(new Date(bestLog.timestamp).getTime() + targetMs).toISOString(), deltaMs: maxIncrease, isPartial: true }
+      }
+    }
+
+    // Ultimate fallback if no suitable pause log was found
+    if (!targetLogId) {
+      // Fallback to the last HOME log 
+      const homeLogs = logsCopy.filter(l => l.platform === 'home')
+      if (homeLogs.length === 0) return null // Can't adjust if no home logs
+      
+      const last = homeLogs[homeLogs.length - 1]
+      targetLogId = last.id
+      originalTs = last.timestamp
+      adjustmentMs = last.action === 'pause' ? deltaMs : -deltaMs
+      isPartial = false // brute force, might cross
+    }
+
+    const newTs = new Date(new Date(originalTs).getTime() + adjustmentMs)
+    return {
+      logId: targetLogId,
+      originalTs,
+      newTs: newTs.toISOString(),
+      deltaMs: adjustmentMs, // actual adjustment being applied
+      isPartial
+    }
+  })()
+
+  async function applySuggestion() {
+    if (!logAdjustmentSuggestion || logAdjustmentSuggestion.type === 'create_block') return
+    const { logId, newTs } = logAdjustmentSuggestion
+    isSaving = true
+    const sb = getSupabase()
+    const payload = {
+      timestamp: newTs,
+      date_key: newTs.slice(0, 10),
+    }
+    const { error } = await sb.from('work_logs').update(payload).eq('id', logId)
+    isSaving = false
+    if (error) { showToast('Update failed: ' + error.message, 'error'); return }
+    logs.update(ls => ls.map(l => l.id === logId ? { ...l, ...payload } : l))
+    showToast('Log adjusted for rebalancing', 'success')
+  }
+
+  async function applyCreateBlock() {
+    const sugg = logAdjustmentSuggestion
+    if (!sugg || sugg.type !== 'create_block') return
+    
+    isSaving = true
+    const sb = getSupabase()
+    
+    const log1 = {
+      user_id: $user.id,
+      timestamp: sugg.newStartTs,
+      platform: 'home',
+      action: 'resume',
+      date_key: $selectedDate
+    }
+    
+    const log2 = {
+      user_id: $user.id,
+      timestamp: sugg.newEndTs,
+      platform: 'home',
+      action: 'pause',
+      date_key: $selectedDate
+    }
+    
+    const p1 = sb.from('work_logs').insert(log1).select().single()
+    const p2 = sb.from('work_logs').insert(log2).select().single()
+    
+    const [r1, r2] = await Promise.all([p1, p2])
+    isSaving = false
+    if (r1.error || r2.error) {
+      showToast('Error creating block: ' + (r1.error || r2.error).message, 'error')
+    } else {
+      logs.update(ls => [...ls, r1.data, r2.data])
+      showToast('Rebalance block created', 'success')
+    }
+  }
 </script>
 
 <div class="logs-screen">
@@ -177,6 +485,14 @@
           >
             ⚠ Above Max
           </button>
+          <button
+            class="pill {showRebalancing ? 'pill-primary' : 'pill-muted'}"
+            style="cursor: pointer; border: 1.5px solid transparent;"
+            on:click={() => showRebalancing = !showRebalancing}
+            title="Suggest how to redistribute hours to fix violations"
+          >
+            ⚖ Rebalance
+          </button>
         </div>
       </div>
       <div class="cal-nav-right">
@@ -202,19 +518,127 @@
             class:cal-cell--under-min={cell.underMin}
             class:cal-cell--above-max={cell.aboveMax}
             class:cal-cell--filtered-out={(filterUnderMin && !cell.underMin) || (filterAboveMax && !cell.aboveMax)}
+            class:cal-cell--rebal-donor={showRebalancing && rebalMap[cell.key] < 0}
+            class:cal-cell--rebal-recipient={showRebalancing && rebalMap[cell.key] > 0}
             on:click={() => selectedDate.set(cell.key)}
           >
             <span class="cal-day-num">{cell.d}</span>
             {#if cell.count > 0}
-              <span class="cal-net tabnum">{fmtDuration(cell.netMs)}</span>
-              {#if cell.otMs !== null}
-                <span class="cal-ot tabnum {cell.otMs >= 0 ? 'pos' : 'neg'}">{fmtDuration(cell.otMs, true)}</span>
+              {#if showRebalancing && rebalMap[cell.key] != null}
+                {@const delta  = rebalMap[cell.key]}
+                {@const newNet = cell.netMs + delta}
+                <span class="cal-net cal-net--orig tabnum">{fmtDuration(cell.netMs)}</span>
+                <span class="cal-net cal-net--new tabnum">{fmtDuration(newNet)}</span>
+                <span class="cal-delta tabnum {delta > 0 ? 'pos' : 'neg'}">{fmtDuration(delta, true)}</span>
+              {:else}
+                <span class="cal-net tabnum">{fmtDuration(cell.netMs)}</span>
+                {#if cell.otMs !== null}
+                  <span class="cal-ot tabnum {cell.otMs >= 0 ? 'pos' : 'neg'}">{fmtDuration(cell.otMs, true)}</span>
+                {/if}
               {/if}
             {/if}
           </button>
         {/if}
       {/each}
     </div>
+
+    {#if showRebalancing && rebalancing}
+      <div class="rebal-panel">
+
+        <!-- Header -->
+        <div class="rebal-hd" style="flex-direction: column; align-items: flex-start; gap: 0.5rem;">
+          <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="rebal-hd-icon">&#9878;</span>
+              <p class="rebal-hd-title" style="margin: 0; font-size: 1.1rem; font-weight: 600;">Hour Redistribution Plan</p>
+            </div>
+            {#if rebalancing.noViolations}
+              <span class="badge badge-success">Balanced</span>
+            {:else}
+              <span class="badge badge-warning">Action Required</span>
+            {/if}
+          </div>
+          <p class="info-text" style="margin: 0; font-size: 0.85rem;">
+            Transferring hours between days. Monthly OT is unaffected: <strong><span class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</span></strong>
+          </p>
+          <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
+        </div>
+
+        {#if !rebalancing.transfers.length}
+          <div class="rebal-clean">
+            <span class="rebal-clean-icon">&#10003;</span>
+            <p>All logged days are already within {$minimumDailyHours}h–{$maximumDailyHours}h. Nothing to adjust.</p>
+          </div>
+        {:else}
+
+          <!-- Donors -->
+          {#if rebalSummary.donors.length}
+            <div class="rebal-section">
+              <p class="rebal-section-lbl rebal-lbl-donor">&#128228; Giving hours</p>
+              {#each rebalSummary.donors as d}
+                <button class="rebal-row rebal-row--donor"
+                  on:click={() => selectedDate.set(d.key)}
+                  title="View logs for {fmtKeyShort(d.key)}"
+                >
+                  <span class="rebal-day">{fmtKeyShort(d.key)}</span>
+                  <div class="rebal-flow">
+                    <span class="rebal-orig">{fmtDuration(d.originalMs)}</span>
+                    <span class="rebal-arr">&rarr;</span>
+                    <span class="rebal-new rebal-new--donor">{fmtDuration(d.newMs)}</span>
+                  </div>
+                  <span class="rebal-badge rebal-badge--donor">{fmtDuration(d.deltaMs, true)}</span>
+                  <span class="rebal-view-hint">&#9654; logs</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- Recipients -->
+          {#if rebalSummary.recipients.length}
+            <div class="rebal-section">
+              <p class="rebal-section-lbl rebal-lbl-recipient">&#128229; Receiving hours</p>
+              {#each rebalSummary.recipients as r}
+                <button class="rebal-row rebal-row--recipient"
+                  on:click={() => selectedDate.set(r.key)}
+                  title="View logs for {fmtKeyShort(r.key)}"
+                >
+                  <span class="rebal-day">{fmtKeyShort(r.key)}</span>
+                  <div class="rebal-flow">
+                    <span class="rebal-orig">{fmtDuration(r.originalMs)}</span>
+                    <span class="rebal-arr">&rarr;</span>
+                    <span class="rebal-new rebal-new--recipient">{fmtDuration(r.newMs)}</span>
+                  </div>
+                  <span class="rebal-badge rebal-badge--recipient">{fmtDuration(r.deltaMs, true)}</span>
+                  <span class="rebal-view-hint">&#9654; logs</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- Footer status -->
+          {#if rebalancing.noViolations}
+            <div class="rebal-footer rebal-footer--ok">
+              <span>&#10003;</span>
+              <span>All days would land between {$minimumDailyHours}h and {$maximumDailyHours}h after these adjustments.</span>
+            </div>
+          {:else}
+            <div class="rebal-footer rebal-footer--warn">
+              <span>&#9888;</span>
+              <div>
+                <p>Not enough surplus to cover all violations.</p>
+                {#if rebalancing.stillUnderMin.length}
+                  <p class="rebal-footer-detail">Still under {$minimumDailyHours}h: {rebalancing.stillUnderMin.map(fmtKeyShort).join(' &middot; ')}</p>
+                {/if}
+                {#if rebalancing.stillAboveMax.length}
+                  <p class="rebal-footer-detail">Still above {$maximumDailyHours}h: {rebalancing.stillAboveMax.map(fmtKeyShort).join(' &middot; ')}</p>
+                {/if}
+              </div>
+            </div>
+          {/if}
+
+        {/if}
+      </div>
+    {/if}
   </aside>
 
   <!-- RIGHT: Day logs -->
@@ -234,6 +658,42 @@
         <button class="btn btn-sm btn-primary" on:click={startNewLog}>+ Add Log</button>
       </div>
     </div>
+
+    {#if showRebalancing && rebalMap[$selectedDate] != null}
+      {@const selDelta  = rebalMap[$selectedDate]}
+      {@const selNewNet = selNetMs + selDelta}
+      {@const isDonor   = selDelta < 0}
+      {@const selOt     = selNetMs - ($requiredHours * 3_600_000)}
+      {@const newOt     = selNewNet - ($requiredHours * 3_600_000)}
+      <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : 'rebal-day-banner--recipient'}">
+        <div class="rebal-day-banner-icon">{isDonor ? '📤' : '📥'}</div>
+        <div class="rebal-day-banner-body">
+          <p class="rebal-day-banner-title">
+            {isDonor ? 'This day is giving hours away' : 'This day needs more hours'}
+          </p>
+          <div class="rebal-day-banner-row">
+            <span class="rebal-day-banner-label">Now:</span>
+            <strong class="rebal-day-banner-val">{fmtDuration(selNetMs)}</strong>
+            <span class="rebal-day-banner-arrow">→</span>
+            <span class="rebal-day-banner-label">Target:</span>
+            <strong class="rebal-day-banner-val rebal-day-banner-target">{fmtDuration(selNewNet)}</strong>
+            <span class="rebal-day-banner-badge {isDonor ? 'donor' : 'recipient'}">{fmtDuration(selDelta, true)}</span>
+          </div>
+          <div class="rebal-day-banner-row" style="margin-top: 0.25rem;">
+            <span class="rebal-day-banner-label">OT Before:</span>
+            <strong class="rebal-day-banner-val" style="color: {selOt < 0 ? 'var(--danger-color)' : 'var(--success-color)'}">{selOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(selOt))}</strong>
+            <span class="rebal-day-banner-arrow">→</span>
+            <span class="rebal-day-banner-label">OT After:</span>
+            <strong class="rebal-day-banner-val rebal-day-banner-target" style="color: {newOt < 0 ? 'var(--danger-color)' : 'var(--success-color)'}">{newOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(newOt))}</strong>
+          </div>
+          <p class="rebal-day-banner-hint">
+            {isDonor
+              ? `We suggest adjusting the highlighted log entry below to hit ${fmtDuration(selNewNet)}.`
+              : `We suggest adjusting the highlighted log entry below to hit ${fmtDuration(selNewNet)}.`}
+          </p>
+        </div>
+      </div>
+    {/if}
 
     {#if selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
       <div class="min-hours-warning">
@@ -262,8 +722,18 @@
           </thead>
           <tbody>
             {#each $selectedDayLogs as log (log.id)}
-              <tr class:editing={$editingLogId === log.id}>
-                <td class="tabnum">{fmtTs(log.timestamp)}</td>
+              {@const isSugg = logAdjustmentSuggestion?.logId === log.id}
+              <tr class:editing={$editingLogId === log.id} class:suggested-row={isSugg}>
+                <td class="tabnum" style="min-width: 85px;">
+                  {#if isSugg}
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                      <span style="text-decoration: line-through; opacity: 0.5;">{fmtTs(log.timestamp)}</span>
+                      <strong class="cal-delta {logAdjustmentSuggestion.deltaMs > 0 ? 'pos' : 'neg'}">{fmtTs(logAdjustmentSuggestion.newTs)}</strong>
+                    </div>
+                  {:else}
+                    {fmtTs(log.timestamp)}
+                  {/if}
+                </td>
                 <td>
                   <span class="pill pill-{log.platform === 'office' ? 'office' : 'home'}">{log.platform}</span>
                 </td>
@@ -273,11 +743,40 @@
                 {#if $logResolution === 'full'}<td class="tabnum muted">{fmtDate(log.timestamp)}</td>{/if}
                 <td class="note-cell">{log.note || '—'}</td>
                 {#if $logResolution === 'full'}<td class="muted tabnum">{fmtTs(log.created_at)}</td>{/if}
-                <td>
+                <td style="display: flex; gap: 4px;">
+                  {#if isSugg}
+                    <button 
+                      class="btn btn-sm btn-primary" 
+                      style="padding: 2px 8px; font-size: 0.75rem; white-space: nowrap; box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);" 
+                      on:click={applySuggestion} 
+                      disabled={isSaving}
+                    >
+                      {logAdjustmentSuggestion.isPartial ? '✨ Apply (Partial)' : '✨ Apply'}
+                    </button>
+                  {/if}
                   <button class="btn btn-sm btn-secondary" on:click={() => startEdit(log)}>✏️ Edit</button>
                 </td>
               </tr>
             {/each}
+
+            {#if logAdjustmentSuggestion?.type === 'create_block'}
+              <tr class="suggested-row">
+                <td class="tabnum" style="min-width: 85px;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newStartTs)}</strong>
+                    <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newEndTs)}</strong>
+                  </div>
+                </td>
+                <td><span class="pill pill-home">home</span></td>
+                <td><span class="pill pill-muted">new block</span></td>
+                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                <td style="display: flex; gap: 4px;">
+                  <button class="btn btn-sm btn-primary" on:click={applyCreateBlock}>
+                    ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
+                  </button>
+                </td>
+              </tr>
+            {/if}
           </tbody>
         </table>
       </div>
@@ -393,6 +892,107 @@
   .cal-ot.pos { color: var(--color-ot-pos); }
   .cal-ot.neg { color: var(--color-ot-neg); }
 
+  /* Rebalancing cell overlays */
+  .cal-cell--rebal-donor     { border-right: 3px solid hsl(38 95% 55%); }
+  .cal-cell--rebal-recipient { border-right: 3px solid var(--color-ot-pos); }
+  .cal-net--orig { font-size: 0.6rem; text-decoration: line-through; opacity: 0.45; }
+  .cal-net--new  { font-size: 0.72rem; font-weight: 700; color: var(--color-primary); }
+  .cal-delta     { font-size: 0.65rem; font-weight: 700; }
+  .cal-delta.pos { color: var(--color-ot-pos); }
+  .cal-delta.neg { color: hsl(38 95% 55%); }
+
+  /* ── Rebalancing panel ────────────────────────────────────── */
+  .rebal-panel {
+    margin-top: 0.875rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    overflow: hidden;
+    font-size: 0.8rem;
+  }
+
+  /* Header */
+  .rebal-hd {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.65rem 0.875rem;
+    background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+    border-bottom: 1px solid var(--color-border);
+  }
+  .rebal-hd-icon { font-size: 1.15rem; line-height: 1; }
+  .rebal-hd-title { font-weight: 700; font-size: 0.82rem; color: var(--color-text); }
+  .rebal-hd-sub   { font-size: 0.72rem; color: var(--color-text-muted); margin-top: 1px; }
+  .rebal-hd-hint  { font-size: 0.68rem; color: var(--color-primary); margin-top: 3px; opacity: 0.8; }
+
+  /* Clean / no-violation state */
+  .rebal-clean {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.75rem 0.875rem;
+    color: var(--color-ot-pos); font-size: 0.8rem;
+  }
+  .rebal-clean-icon { font-size: 1.1rem; }
+
+  /* Sections */
+  .rebal-section { padding: 0.5rem 0.875rem 0.25rem; }
+  .rebal-section + .rebal-section { border-top: 1px solid var(--color-border); }
+  .rebal-section-lbl {
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; margin-bottom: 0.375rem;
+  }
+  .rebal-lbl-donor     { color: hsl(38 95% 55%); }
+  .rebal-lbl-recipient { color: var(--color-ot-pos); }
+
+  /* Row (now a button) */
+  .rebal-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.25rem;
+    width: 100%;
+    text-align: left;
+    border: none;
+    cursor: pointer;
+    transition: filter 0.15s, box-shadow 0.15s;
+  }
+  .rebal-row:hover { filter: brightness(1.06); box-shadow: 0 0 0 1.5px var(--color-primary); }
+  .rebal-row--donor     { background: color-mix(in srgb, hsl(38 95% 55%) 8%,  var(--color-surface-2)); }
+  .rebal-row--recipient { background: color-mix(in srgb, var(--color-ot-pos) 8%, var(--color-surface-2)); }
+
+  .rebal-view-hint {
+    font-size: 0.65rem; color: var(--color-primary); opacity: 0;
+    transition: opacity 0.15s; white-space: nowrap;
+  }
+  .rebal-row:hover .rebal-view-hint { opacity: 1; }
+
+  .rebal-day  { font-weight: 600; font-size: 0.78rem; white-space: nowrap; }
+  .rebal-flow { display: flex; align-items: center; gap: 0.3rem; font-variant-numeric: tabular-nums; }
+  .rebal-orig { color: var(--color-text-muted); text-decoration: line-through; font-size: 0.72rem; }
+  .rebal-arr  { color: var(--color-text-muted); font-size: 0.7rem; }
+  .rebal-new  { font-weight: 700; font-size: 0.78rem; }
+  .rebal-new--donor     { color: hsl(38 95% 55%); }
+  .rebal-new--recipient { color: var(--color-ot-pos); }
+
+  .rebal-badge {
+    font-size: 0.7rem; font-weight: 700;
+    padding: 1px 5px; border-radius: 999px;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .rebal-badge--donor     { background: color-mix(in srgb, hsl(38 95% 55%) 18%, transparent); color: hsl(38 95% 45%); }
+  .rebal-badge--recipient { background: color-mix(in srgb, var(--color-ot-pos) 18%, transparent); color: var(--color-ot-pos); }
+
+  /* Footer */
+  .rebal-footer {
+    display: flex; align-items: flex-start; gap: 0.5rem;
+    padding: 0.6rem 0.875rem;
+    font-size: 0.78rem;
+    border-top: 1px solid var(--color-border);
+  }
+  .rebal-footer--ok   { color: var(--color-ot-pos); background: color-mix(in srgb, var(--color-ot-pos) 6%, transparent); }
+  .rebal-footer--warn { color: var(--color-ot-neg); background: color-mix(in srgb, var(--color-ot-neg) 6%, transparent); }
+  .rebal-footer-detail { font-size: 0.72rem; margin-top: 2px; opacity: 0.85; }
+
   /* Day panel */
   .day-panel { display: flex; flex-direction: column; gap: 1rem; }
   .day-header { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -404,6 +1004,43 @@
     background: var(--color-ot-neg-subtle); color: var(--color-ot-neg);
     font-size: 0.85rem; border: 1px solid color-mix(in srgb, var(--color-ot-neg) 30%, transparent);
   }
+
+  /* Rebalancing day banner */
+  .rebal-day-banner {
+    display: flex; align-items: flex-start; gap: 0.75rem;
+    padding: 0.875rem 1rem; border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+  }
+  .rebal-day-banner--donor {
+    background: color-mix(in srgb, hsl(38 95% 55%) 10%, var(--color-surface-2));
+    border-color: color-mix(in srgb, hsl(38 95% 55%) 35%, transparent);
+    color: hsl(38 85% 38%);
+  }
+  [data-theme="dark"] .rebal-day-banner--donor { color: hsl(38 95% 65%); }
+  .rebal-day-banner--recipient {
+    background: color-mix(in srgb, var(--color-ot-pos) 10%, var(--color-surface-2));
+    border-color: color-mix(in srgb, var(--color-ot-pos) 35%, transparent);
+    color: var(--color-ot-pos);
+  }
+  .rebal-day-banner-icon { font-size: 1.4rem; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+  .rebal-day-banner-body { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; }
+  .rebal-day-banner-title { font-weight: 700; font-size: 0.85rem; }
+  .rebal-day-banner-row {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-variant-numeric: tabular-nums; flex-wrap: wrap;
+  }
+  .rebal-day-banner-label { font-size: 0.75rem; opacity: 0.75; }
+  .rebal-day-banner-val   { font-size: 0.88rem; }
+  .rebal-day-banner-arrow { opacity: 0.5; }
+  .rebal-day-banner-target { font-size: 1rem; }
+  .rebal-day-banner-badge {
+    font-size: 0.72rem; font-weight: 700;
+    padding: 1px 7px; border-radius: 999px; margin-left: 0.25rem;
+  }
+  .rebal-day-banner-badge.donor     { background: color-mix(in srgb, hsl(38 95% 55%) 20%, transparent); }
+  .rebal-day-banner-badge.recipient { background: color-mix(in srgb, var(--color-ot-pos) 20%, transparent); }
+  .rebal-day-banner-hint { font-size: 0.78rem; opacity: 0.8; line-height: 1.4; }
+
   .empty-state { text-align: center; color: var(--color-text-muted); padding: 3rem 0; font-size: 0.9rem; }
 
   /* Log table */
@@ -414,6 +1051,7 @@
   .log-table td { padding: 0.5rem 0.75rem; border-top: 1px solid var(--color-border); }
   .log-table tr:hover td { background: var(--color-surface-2); }
   .log-table tr.editing td { background: var(--color-primary-subtle); }
+  .log-table tr.suggested-row td { background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-2)); }
   .note-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .muted { color: var(--color-text-muted); }
 
