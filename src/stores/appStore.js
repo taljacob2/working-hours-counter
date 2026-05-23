@@ -8,6 +8,7 @@ export const user = writable(null)
 export const logs = writable([])
 export const requiredHours = writable(9)
 export const minimumDailyHours = writable(5)
+export const maximumDailyHours = writable(12)
 export const use24HourFormat = writable(true)
 
 // ── UI state ──────────────────────────────────────────────────

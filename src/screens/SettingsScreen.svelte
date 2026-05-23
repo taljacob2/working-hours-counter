@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -9,6 +9,9 @@
 
   let minHoursLocal = 5
   minimumDailyHours.subscribe(v => minHoursLocal = v)
+
+  let maxHoursLocal = 12
+  maximumDailyHours.subscribe(v => maxHoursLocal = v)
 
   let use24Local = true
   use24HourFormat.subscribe(v => use24Local = v)
@@ -20,12 +23,18 @@
   function onMinSlider(e)  { minHoursLocal = parseFloat(e.target.value) }
   function onMinNumber(e)  { minHoursLocal = Math.min(14, Math.max(1, parseFloat(e.target.value) || 5)) }
 
+  function onMaxSlider(e)  { maxHoursLocal = parseFloat(e.target.value) }
+  function onMaxNumber(e)  { maxHoursLocal = Math.min(24, Math.max(8, parseFloat(e.target.value) || 12)) }
+
   async function saveSettings() {
     requiredHours.set(reqHoursLocal)
     localStorage.setItem('whl_req_hours', String(reqHoursLocal))
 
     minimumDailyHours.set(minHoursLocal)
     localStorage.setItem('whl_min_hours', String(minHoursLocal))
+
+    maximumDailyHours.set(maxHoursLocal)
+    localStorage.setItem('whl_max_hours', String(maxHoursLocal))
 
     use24HourFormat.set(use24Local)
     localStorage.setItem('whl_24h_format', String(use24Local))
@@ -34,6 +43,7 @@
     const { error } = await sb.from('work_settings').upsert([
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
       { key: 'minimumDailyHours', value: String(minHoursLocal) },
+      { key: 'maximumDailyHours', value: String(maxHoursLocal) },
       { key: 'use24HourFormat', value: String(use24Local) }
     ])
     if (error) showToast('Settings save failed: ' + error.message, 'error')
@@ -112,6 +122,9 @@
         />
         <span class="hours-label">h / day</span>
       </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        The daily target. Days that fall short of this are marked as negative overtime.
+      </p>
     </div>
 
     <div style="margin-bottom: 1.5rem">
@@ -128,7 +141,25 @@
         <span class="hours-label">h / day</span>
       </div>
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
-        A warning will be shown on any day you log time but fall short of this minimum.
+        The lower bound. Days where you log time but fall short of this are flagged with a warning.
+      </p>
+    </div>
+
+    <div style="margin-bottom: 1.5rem">
+      <label>Maximum Daily Hours</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="max-slider" type="range" min="8" max="24" step="0.5"
+          bind:value={maxHoursLocal} on:input={onMaxSlider}
+          style="flex:1"
+        />
+        <input id="max-num" type="number" min="8" max="24" step="0.5"
+          bind:value={maxHoursLocal} on:input={onMaxNumber}
+          style="width:80px"
+        />
+        <span class="hours-label">h / day</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        The upper bound. Days where you exceed this are highlighted in the calendar and can be filtered.
       </p>
     </div>
 

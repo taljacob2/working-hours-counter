@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, use24HourFormat } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -13,6 +13,7 @@
 
   const todayKey = dateKey()
   let filterUnderMin = false
+  let filterAboveMax = false
 
   // ── Calendar helpers ─────────────────────────────────────────
   const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -41,7 +42,8 @@
       const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? now : null)
       const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? now : null)
       const underMin = netMs > 0 && netMs < minMs
-      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin })
+      const aboveMax = netMs > $maximumDailyHours * 3_600_000
+      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax })
     }
     return cells
   }
@@ -166,6 +168,15 @@
           >
             ⚠ Filter Under Min
           </button>
+          <button 
+            class="pill {filterAboveMax ? 'pill-ot-pos' : 'pill-muted'}" 
+            style="cursor: pointer; border: 1.5px solid transparent;" 
+            class:active-filter-max={filterAboveMax}
+            on:click={() => filterAboveMax = !filterAboveMax}
+            title="Filter by above {$maximumDailyHours}h maximum"
+          >
+            ⚠ Filter Above Max
+          </button>
         </div>
       </div>
       <div class="cal-nav-right">
@@ -189,7 +200,8 @@
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
             class:cal-cell--under-min={cell.underMin}
-            class:cal-cell--filtered-out={filterUnderMin && !cell.underMin}
+            class:cal-cell--above-max={cell.aboveMax}
+            class:cal-cell--filtered-out={(filterUnderMin && !cell.underMin) || (filterAboveMax && !cell.aboveMax)}
             on:click={() => selectedDate.set(cell.key)}
           >
             <span class="cal-day-num">{cell.d}</span>
@@ -370,8 +382,10 @@
   .cal-cell--ot-pos { border-left: 3px solid var(--color-ot-pos); }
   .cal-cell--ot-neg { border-left: 3px solid var(--color-ot-neg); }
   .cal-cell--under-min { box-shadow: inset 0 0 0 1.5px var(--color-ot-neg); }
+  .cal-cell--above-max { box-shadow: inset 0 0 0 1.5px hsl(38 95% 55%); }
   .cal-cell--filtered-out { opacity: 0.15; pointer-events: none; }
-  .active-filter { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
+  .active-filter     { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
+  .active-filter-max { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
   .cal-day-num { font-size: 0.8rem; font-weight: 600; }
   .cal-net { font-size: 0.65rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .cal-ot { font-size: 0.65rem; font-weight: 600; font-variant-numeric: tabular-nums; }
