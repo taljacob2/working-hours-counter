@@ -166,7 +166,7 @@
             on:click={() => filterUnderMin = !filterUnderMin}
             title="Filter by under minimum"
           >
-            ⚠ Filter Under Min
+            ⚠ Under Min
           </button>
           <button 
             class="pill {filterAboveMax ? 'pill-ot-pos' : 'pill-muted'}" 
@@ -175,7 +175,7 @@
             on:click={() => filterAboveMax = !filterAboveMax}
             title="Filter by above {$maximumDailyHours}h maximum"
           >
-            ⚠ Filter Above Max
+            ⚠ Above Max
           </button>
         </div>
       </div>
