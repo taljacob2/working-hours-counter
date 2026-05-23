@@ -27,16 +27,34 @@ A personal work-hours tracking app built with **Svelte + Supabase**, deployed to
    - **Project URL** — `https://xxxx.supabase.co`
    - **Anon (public) key** — `eyJ…`
 
-### 2. Run locally
+### 2. Configure credentials (optional — recommended for local dev)
+
+Instead of entering credentials in the browser Config screen every time, you can supply them via a `.env` file:
+
+```bash
+cp .env.template .env
+# then open .env and fill in your values
+```
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL (`https://xxxx.supabase.co`) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Your Supabase anon/public key |
+
+Vite automatically loads `.env` during `npm run dev` and `npm run build`. When these variables are present the app skips the Config screen entirely and the **Reconfigure** button is locked, so credentials cannot be overwritten at runtime.
+
+> **Note:** `.env` is listed in `.gitignore` — your secrets will never be committed. The checked-in `.env.template` contains only placeholder values and serves as documentation.
+
+### 3. Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173/working-hours-counter/ and follow the on-screen Config screen to paste your Supabase URL and anon key.
+Open http://localhost:5173/working-hours-counter/ — if you filled in `.env` you will land directly on the sign-in screen.
 
-### 3. Deploy to GitHub Pages
+### 4. Deploy to GitHub Pages
 
 ```bash
 npm run deploy
