@@ -168,17 +168,23 @@
 
     const transfers = []
 
-    // Pass 1: off-day home hours → under-required working days (first-priority pass).
+    // Pass 1: off-day home hours → working days.
+    // Priority 1: fill under-required days first. Priority 2: fill under-max days.
     // Off days go first so their surplus is never crowded out by working-day OT donors.
     for (const donor of days.filter(d => d.isOff && d.currentMs > d.offMs).sort((a, b) => b.currentMs - a.currentMs)) {
       const floor = donor.offMs
       while (donor.currentMs > floor) {
-        const rec = days
+        const underReq = days
           .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs)
           .sort((a, b) => a.currentMs - b.currentMs)[0]
+        const underMax = !underReq && days
+          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs)
+          .sort((a, b) => a.currentMs - b.currentMs)[0]
+        const rec = underReq || underMax
         if (!rec) break
         const available = donor.currentMs - floor
-        const needed    = reqMs - rec.currentMs
+        const needed    = (rec.currentMs < reqMs ? reqMs : maxMs) - rec.currentMs
+        if (needed <= 0) break
         const transfer  = Math.min(available, needed)
         donor.currentMs -= transfer
         rec.currentMs   += transfer
