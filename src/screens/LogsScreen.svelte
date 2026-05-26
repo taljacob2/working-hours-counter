@@ -223,12 +223,40 @@
       }
     }
 
+    // Pass 3: remaining above-max excess → working days below max (distributed as extra OT).
+    // Runs after Pass 2 when above-max donors still have surplus that couldn't go to
+    // under-required recipients (because they were all already at required hours).
+    for (const d of days) d.tappedOut3 = false
+    const pass3Recipients = days
+      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs)
+      .sort((a, b) => a.currentMs - b.currentMs)
+
+    for (const rec of pass3Recipients) {
+      while (rec.currentMs < maxMs) {
+        const donor = days
+          .filter(d => !d.isOff && !d.tappedOut3 && d.currentMs > maxMs)
+          .sort((a, b) => b.currentMs - a.currentMs)[0]
+        if (!donor) break
+        const floor    = Math.max(maxMs, donor.offMs)
+        const available = donor.currentMs - floor
+        if (available <= 0) { donor.tappedOut3 = true; continue }
+        const needed   = maxMs - rec.currentMs
+        const transfer = Math.min(available, needed)
+        donor.currentMs -= transfer
+        rec.currentMs   += transfer
+        transfers.push({ from: donor.key, to: rec.key, ms: transfer, isExcessOt: true })
+      }
+    }
+
     // Off days are never violations — only check non-off days
     const stillUnderMin = days.filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
     const stillAboveMax = days.filter(d => !d.isOff && d.currentMs > maxMs).map(d => d.key)
     const noViolations  = stillUnderMin.length === 0 && stillAboveMax.length === 0
 
-    return { transfers, stillUnderMin, stillAboveMax, noViolations }
+    // Keys that received excess-OT transfers (Pass 3) — shown distinctly in the panel
+    const excessOtRecipients = new Set(transfers.filter(t => t.isExcessOt).map(t => t.to))
+
+    return { transfers, stillUnderMin, stillAboveMax, noViolations, excessOtRecipients }
   }
 
   $: rebalancing = showRebalancing
@@ -260,12 +288,14 @@
     for (const [key, deltaMs] of Object.entries(rebalMap)) {
       const cell = calDays.find(c => c && c.key === key)
       if (!cell) continue
-      const entry = { key, originalMs: cell.netMs, newMs: cell.netMs + deltaMs, deltaMs }
+      // isExcessOt = this day received Pass-3 excess-OT hours (may also have received normal hours)
+      const isExcessOt = rebalancing.excessOtRecipients.has(key)
+      const entry = { key, originalMs: cell.netMs, newMs: cell.netMs + deltaMs, deltaMs, isExcessOt }
       if (deltaMs < 0) donors.push(entry)
       else             recipients.push(entry)
     }
-    donors.sort((a, b) => a.deltaMs - b.deltaMs)       // biggest donor first
-    recipients.sort((a, b) => b.deltaMs - a.deltaMs)   // biggest recipient first
+    donors.sort((a, b) => a.deltaMs - b.deltaMs)
+    recipients.sort((a, b) => b.deltaMs - a.deltaMs)
     return { donors, recipients }
   })()
 
@@ -721,7 +751,7 @@
             <div class="rebal-section">
               <p class="rebal-section-lbl rebal-lbl-recipient">&#128229; Receiving hours</p>
               {#each rebalSummary.recipients as r}
-                <button class="rebal-row rebal-row--recipient"
+                <button class="rebal-row {r.isExcessOt ? 'rebal-row--excess-ot' : 'rebal-row--recipient'}"
                   on:click={() => selectedDate.set(r.key)}
                   title="View logs for {fmtKeyShort(r.key)}"
                 >
@@ -729,9 +759,12 @@
                   <div class="rebal-flow">
                     <span class="rebal-orig">{fmtDuration(r.originalMs)}</span>
                     <span class="rebal-arr">&rarr;</span>
-                    <span class="rebal-new rebal-new--recipient">{fmtDuration(r.newMs)}</span>
+                    <span class="rebal-new {r.isExcessOt ? 'rebal-new--excess-ot' : 'rebal-new--recipient'}">{fmtDuration(r.newMs)}</span>
                   </div>
-                  <span class="rebal-badge rebal-badge--recipient">{fmtDuration(r.deltaMs, true)}</span>
+                  <span class="rebal-badge {r.isExcessOt ? 'rebal-badge--excess-ot' : 'rebal-badge--recipient'}">{fmtDuration(r.deltaMs, true)}</span>
+                  {#if r.isExcessOt}
+                    <span class="rebal-excess-ot-tag">+OT</span>
+                  {/if}
                   <span class="rebal-view-hint">&#9654; logs</span>
                 </button>
               {/each}
@@ -804,17 +837,20 @@
       {@const excessMs        = Math.max(0, selNewNet - maxMs)}
       {#if hasRebalDelta || isStillAboveMax}
         {@const isDonor = selDelta < 0 || isStillAboveMax}
+        {@const isExcessOtRec = !isDonor && (rebalancing?.excessOtRecipients?.has($selectedDate) ?? false)}
         {@const finalTarget = isStillAboveMax ? maxMs : selNewNet}
         {@const selOt = selDayIsOff ? selNetMs : selNetMs - ($requiredHours * 3_600_000)}
         {@const newOt = selDayIsOff ? finalTarget : finalTarget - ($requiredHours * 3_600_000)}
-        <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : 'rebal-day-banner--recipient'}">
-          <div class="rebal-day-banner-icon">{isDonor ? '📤' : '📥'}</div>
+        <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : isExcessOtRec ? 'rebal-day-banner--excess-ot' : 'rebal-day-banner--recipient'}">
+          <div class="rebal-day-banner-icon">{isDonor ? '📤' : isExcessOtRec ? '📊' : '📥'}</div>
           <div class="rebal-day-banner-body">
             <p class="rebal-day-banner-title">
               {#if isStillAboveMax && excessMs > 0}
                 This day is giving hours away — {fmtDuration(excessMs)} excess must be trimmed
               {:else if isDonor}
                 This day is giving hours away
+              {:else if isExcessOtRec}
+                This day is receiving redistributed overtime
               {:else}
                 This day needs more hours
               {/if}
@@ -862,9 +898,11 @@
             {/if}
 
             <p class="rebal-day-banner-hint">
-              {isDonor
-                ? `Adjust the highlighted log entry below to hit ${fmtDuration(finalTarget)}.`
-                : `Adjust the highlighted log entry below to hit ${fmtDuration(finalTarget)}.`}
+              {#if isExcessOtRec}
+                These extra OT hours come from an above-max day. Add them to your home log to complete the redistribution.
+              {:else}
+                Adjust the highlighted log entry below to hit {fmtDuration(finalTarget)}.
+              {/if}
             </p>
           </div>
         </div>
@@ -1167,6 +1205,7 @@
   .rebal-row:hover { filter: brightness(1.06); box-shadow: 0 0 0 1.5px var(--color-primary); }
   .rebal-row--donor     { background: color-mix(in srgb, hsl(38 95% 55%) 8%,  var(--color-surface-2)); }
   .rebal-row--recipient { background: color-mix(in srgb, var(--color-ot-pos) 8%, var(--color-surface-2)); }
+  .rebal-row--excess-ot { background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2)); }
 
   .rebal-view-hint {
     font-size: 0.65rem; color: var(--color-primary); opacity: 0;
@@ -1181,6 +1220,7 @@
   .rebal-new  { font-weight: 700; font-size: 0.78rem; }
   .rebal-new--donor     { color: hsl(38 95% 55%); }
   .rebal-new--recipient { color: var(--color-ot-pos); }
+  .rebal-new--excess-ot { color: hsl(270 70% 60%); font-weight: 700; }
   .rebal-new--excess    { color: var(--color-ot-neg); font-weight: 700; }
   .rebal-excess-tag {
     font-size: 0.65rem; font-weight: 700;
@@ -1196,6 +1236,15 @@
   }
   .rebal-badge--donor     { background: color-mix(in srgb, hsl(38 95% 55%) 18%, transparent); color: hsl(38 95% 45%); }
   .rebal-badge--recipient { background: color-mix(in srgb, var(--color-ot-pos) 18%, transparent); color: var(--color-ot-pos); }
+  .rebal-badge--excess-ot { background: color-mix(in srgb, hsl(270 70% 60%) 18%, transparent); color: hsl(270 70% 45%); }
+  [data-theme="dark"] .rebal-badge--excess-ot { color: hsl(270 70% 75%); }
+  .rebal-excess-ot-tag {
+    font-size: 0.62rem; font-weight: 700;
+    padding: 1px 5px; border-radius: 999px; white-space: nowrap;
+    background: color-mix(in srgb, hsl(270 70% 60%) 18%, transparent);
+    color: hsl(270 70% 45%);
+  }
+  [data-theme="dark"] .rebal-excess-ot-tag { color: hsl(270 70% 75%); }
 
   /* Footer */
   .rebal-footer {
@@ -1253,6 +1302,12 @@
     border-color: color-mix(in srgb, var(--color-ot-pos) 35%, transparent);
     color: var(--color-ot-pos);
   }
+  .rebal-day-banner--excess-ot {
+    background: color-mix(in srgb, hsl(270 70% 60%) 10%, var(--color-surface-2));
+    border-color: color-mix(in srgb, hsl(270 70% 60%) 35%, transparent);
+    color: hsl(270 70% 45%);
+  }
+  [data-theme="dark"] .rebal-day-banner--excess-ot { color: hsl(270 70% 75%); }
   .rebal-day-banner-icon { font-size: 1.4rem; line-height: 1; flex-shrink: 0; margin-top: 1px; }
   .rebal-day-banner-body { display: flex; flex-direction: column; gap: 0.3rem; flex: 1; }
   .rebal-day-banner-title { font-weight: 700; font-size: 0.85rem; }
