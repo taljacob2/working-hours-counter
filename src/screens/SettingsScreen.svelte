@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -57,18 +57,27 @@
     commuteGapMinutes.set(commuteGapLocal)
     localStorage.setItem('whl_commute_gap', String(commuteGapLocal))
 
+    // If the off-days configuration changed, clear all per-date overrides — they were
+    // set relative to the old config and would silently shadow the new one.
+    const offDaysChanged = [...$offDays].sort().join(',') !== [...offDaysLocal].sort().join(',')
     offDays.set([...offDaysLocal])
     localStorage.setItem('whl_off_days', JSON.stringify(offDaysLocal))
+    if (offDaysChanged) {
+      dayOverrides.set({})
+      localStorage.setItem('whl_day_overrides', '{}')
+    }
 
     const sb = getSupabase()
-    const { error } = await sb.from('work_settings').upsert([
+    const upsertRows = [
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
       { key: 'minimumDailyHours', value: String(minHoursLocal) },
       { key: 'maximumDailyHours', value: String(maxHoursLocal) },
       { key: 'commuteGapMinutes', value: String(commuteGapLocal) },
       { key: 'use24HourFormat', value: String(use24Local) },
-      { key: 'offDays', value: JSON.stringify(offDaysLocal) }
-    ])
+      { key: 'offDays', value: JSON.stringify(offDaysLocal) },
+    ]
+    if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
+    const { error } = await sb.from('work_settings').upsert(upsertRows)
     if (error) showToast('Settings save failed: ' + error.message, 'error')
     else showToast('Settings saved ✓', 'success')
   }
