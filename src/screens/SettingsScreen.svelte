@@ -109,6 +109,56 @@
     showToast(`Exported ${subset.length} records`, 'success')
   }
 
+  function doExportJson() {
+    const { start, end } = monthBounds(expYear, expMonth)
+    const subset = $logs.filter(l => l.date_key >= start && l.date_key <= end)
+    if (!subset.length) { showToast('No logs for that month', 'info'); return }
+    const fileName = `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.json`
+    const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), month: `${expYear}-${String(expMonth).padStart(2,'0')}`, logs: subset }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = fileName; a.click()
+    URL.revokeObjectURL(url)
+    showToast(`Exported ${subset.length} records as JSON`, 'success')
+  }
+
+  // ── Import ────────────────────────────────────────────────────
+  let importFileInput
+  let importFile = null
+  let importing = false
+
+  async function doImportJson() {
+    if (!importFile) return
+    importing = true
+    try {
+      const text = await importFile.text()
+      const parsed = JSON.parse(text)
+      const importLogs = Array.isArray(parsed) ? parsed : parsed.logs
+      if (!importLogs?.length) { showToast('No logs found in file', 'error'); return }
+
+      const required = ['id', 'timestamp', 'platform', 'action', 'date_key']
+      if (!importLogs.every(l => required.every(f => l[f] != null))) {
+        showToast('Invalid log format — missing required fields', 'error'); return
+      }
+
+      const sb = getSupabase()
+      const { error } = await sb.from('work_logs').upsert(importLogs, { onConflict: 'id' })
+      if (error) { showToast('Import failed: ' + error.message, 'error'); return }
+
+      logs.update(ls => {
+        const importIds = new Set(importLogs.map(l => l.id))
+        return [...ls.filter(l => !importIds.has(l.id)), ...importLogs]
+      })
+
+      showToast(`Imported ${importLogs.length} records`, 'success')
+      importFile = null
+      if (importFileInput) importFileInput.value = ''
+    } catch (e) {
+      showToast('Import failed: ' + e.message, 'error')
+    } finally {
+      importing = false
+    }
+  }
+
   // ── Auth / Reconfig ──────────────────────────────────────────
   async function signOut() {
     const sb = getSupabase()
@@ -269,10 +319,31 @@
       <button class="btn btn-primary" on:click={doExport} disabled={expCount === 0}>
         ⬇ Export CSV
       </button>
+      <button class="btn btn-secondary" on:click={doExportJson} disabled={expCount === 0} title="Export as JSON — can be re-imported to restore this state">
+        ⬇ Export JSON
+      </button>
     </div>
     {#if expCount !== null}
       <p class="export-count">{expCount} record{expCount !== 1 ? 's' : ''} for this month</p>
     {/if}
+  </div>
+
+  <!-- Import -->
+  <div class="card">
+    <p class="section-title">Import Logs from JSON</p>
+    <p class="info-text">Restore a previously exported JSON snapshot. Existing records with matching IDs will be overwritten.</p>
+    <div class="export-row" style="margin-top: 0.75rem;">
+      <input
+        bind:this={importFileInput}
+        type="file"
+        accept=".json,application/json"
+        on:change={e => importFile = e.target.files[0] ?? null}
+        style="flex: 1; font-size: 0.875rem;"
+      />
+      <button class="btn btn-primary" on:click={doImportJson} disabled={!importFile || importing}>
+        {importing ? '⏳ Importing…' : '⬆ Import JSON'}
+      </button>
+    </div>
   </div>
 
   <!-- Account / Reconfigure -->

@@ -367,36 +367,31 @@
     return { type: 'create_blocks', blocks, totalDeltaMs: neededMs - remaining, isPartial: remaining > 0 }
   }
 
-  // Per-day log adjustment suggestion
-  $: logAdjustmentSuggestion = (() => {
-    if (!showRebalancing || $selectedDayLogs.length === 0) return null
+  // Pure per-day suggestion function — called by the reactive and by applyAllRebalance
+  function computeDaySuggestion(sortedDayLogs, dateStr, rebalancing, rebalMap, maxMs, commuteGapMins, netMs) {
+    if (!sortedDayLogs.length) return null
 
-    const isStillAboveMax = rebalancing?.stillAboveMax?.includes($selectedDate) ?? false
-    const maxMs = $maximumDailyHours * 3_600_000
+    const isStillAboveMax = rebalancing?.stillAboveMax?.includes(dateStr) ?? false
 
-    // For still-above-max days the target is always maxMs (covers both the
-    // redistribution portion AND the undistributable excess that must be deleted).
     let deltaMs
     if (isStillAboveMax) {
-      deltaMs = -(Math.max(0, selNetMs - maxMs))
+      deltaMs = -(Math.max(0, netMs - maxMs))
       if (deltaMs === 0) return null
-    } else if (rebalMap[$selectedDate] != null) {
-      deltaMs = rebalMap[$selectedDate]
+    } else if (rebalMap[dateStr] != null) {
+      deltaMs = rebalMap[dateStr]
       if (deltaMs === 0) return null
     } else {
       return null
     }
 
-    const logsCopy = [...$selectedDayLogs].sort(byTs)
+    const logsCopy = sortedDayLogs
 
-    // Excess-OT recipient days get new blocks at human hours, not backward-extended logs
     const isExcessOtRec = !isStillAboveMax &&
-      (rebalancing?.excessOtRecipients?.has($selectedDate) ?? false)
+      (rebalancing?.excessOtRecipients?.has(dateStr) ?? false)
     if (isExcessOtRec && deltaMs > 0) {
-      return computeHumanHoursBlocks(logsCopy, deltaMs, $selectedDate, $commuteGapMinutes)
+      return computeHumanHoursBlocks(logsCopy, deltaMs, dateStr, commuteGapMins)
     }
 
-    // Check if there is an open home resume
     let openHomeResume = null
     for (const l of logsCopy) {
       if (l.platform === 'home') {
@@ -405,222 +400,109 @@
       }
     }
 
-    // 1. If we need to ADD time, and we have an open home resume, suggest a pause to close it
     if (deltaMs > 0 && openHomeResume) {
       const curTs = new Date(openHomeResume.timestamp).getTime()
-      let limitTs = new Date($selectedDate + 'T23:59:59').getTime()
-      
+      let limitTs = new Date(dateStr + 'T23:59:59').getTime()
       const nextOffice = logsCopy.find(l => l.timestamp > openHomeResume.timestamp && l.platform === 'office')
-      if (nextOffice) {
-        limitTs = new Date(nextOffice.timestamp).getTime() - ($commuteGapMinutes * 60_000)
-      }
-      
-      const maxInc = limitTs - curTs
-      const inc = Math.min(deltaMs, maxInc)
-      if (inc > 0) {
-        return {
-          type: 'create_log',
-          action: 'pause',
-          newTs: new Date(curTs + inc).toISOString(),
-          deltaMs: inc,
-          isPartial: inc < deltaMs
-        }
-      }
+      if (nextOffice) limitTs = new Date(nextOffice.timestamp).getTime() - (commuteGapMins * 60_000)
+      const inc = Math.min(deltaMs, limitTs - curTs)
+      if (inc > 0) return { type: 'create_log', action: 'pause', newTs: new Date(curTs + inc).toISOString(), deltaMs: inc, isPartial: inc < deltaMs }
     }
 
-    let targetLogId = null
-    let adjustmentMs = 0
-    let originalTs = null
-    let isPartial = false
-
-    const getBenefit = (oldTsIso, newTsIso) => {
-      const oldDt = new Date(oldTsIso)
-      const newDt = new Date(newTsIso)
-      const getDist = (dt) => {
-        const center = new Date(dt)
-        center.setHours(13, 30, 0, 0)
-        return Math.abs(dt.getTime() - center.getTime())
-      }
-      return getDist(oldDt) - getDist(newDt)
+    const getBenefit = (oldTs, newTs) => {
+      const getDist = dt => { const c = new Date(dt); c.setHours(13, 30, 0, 0); return Math.abs(dt.getTime() - c.getTime()) }
+      return getDist(new Date(oldTs)) - getDist(new Date(newTs))
     }
 
     if (deltaMs < 0) {
-      // Need to REDUCE time
       const needed = -deltaMs
-      let candidates = []
-
+      const candidates = []
       for (let i = 0; i < logsCopy.length; i++) {
         const log = logsCopy[i]
-        if (log.platform === 'home') {
-          if (log.action === 'pause') {
-            const prev = logsCopy[i - 1]
-            if (prev && prev.action === 'resume' && prev.platform === 'home') {
-              const resumeTs = new Date(prev.timestamp).getTime()
-              const curTs    = new Date(log.timestamp).getTime()
-              const sessionMs = curTs - resumeTs
-              if (sessionMs > 0) {
-                if (needed >= sessionMs) {
-                  // Deleting the whole session is cleaner than a zero-duration result
-                  candidates.push({
-                    isDeleteSession: true,
-                    resumeLogId: prev.id, pauseLogId: log.id,
-                    sessionDurationMs: sessionMs,
-                    appliedRed: sessionMs,
-                    isPartial: needed > sessionMs
-                  })
-                } else {
-                  const newTsIso = new Date(curTs - needed).toISOString()
-                  candidates.push({
-                    logId: log.id, originalTs: log.timestamp, newTs: newTsIso,
-                    deltaMs: needed, isPartial: false,
-                    appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso)
-                  })
-                }
+        if (log.platform !== 'home') continue
+        if (log.action === 'pause') {
+          const prev = logsCopy[i - 1]
+          if (prev?.action === 'resume' && prev.platform === 'home') {
+            const sessionMs = new Date(log.timestamp) - new Date(prev.timestamp)
+            if (sessionMs > 0) {
+              if (needed >= sessionMs) {
+                candidates.push({ isDeleteSession: true, resumeLogId: prev.id, pauseLogId: log.id, sessionDurationMs: sessionMs, appliedRed: sessionMs, isPartial: needed > sessionMs })
+              } else {
+                const newTsIso = new Date(new Date(log.timestamp).getTime() - needed).toISOString()
+                candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: false, appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso) })
               }
             }
-          } else if (log.action === 'resume') {
-            const next = logsCopy[i + 1]
-            if (next && next.action === 'pause' && next.platform === 'home') {
-              const curTs   = new Date(log.timestamp).getTime()
-              const pauseTs = new Date(next.timestamp).getTime()
-              const sessionMs = pauseTs - curTs
-              if (sessionMs > 0) {
-                if (needed >= sessionMs) {
-                  candidates.push({
-                    isDeleteSession: true,
-                    resumeLogId: log.id, pauseLogId: next.id,
-                    sessionDurationMs: sessionMs,
-                    appliedRed: sessionMs,
-                    isPartial: needed > sessionMs
-                  })
-                } else {
-                  const newTsIso = new Date(curTs + needed).toISOString()
-                  candidates.push({
-                    logId: log.id, originalTs: log.timestamp, newTs: newTsIso,
-                    deltaMs: needed, isPartial: false,
-                    appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso)
-                  })
-                }
+          }
+        } else if (log.action === 'resume') {
+          const next = logsCopy[i + 1]
+          if (next?.action === 'pause' && next.platform === 'home') {
+            const sessionMs = new Date(next.timestamp) - new Date(log.timestamp)
+            if (sessionMs > 0) {
+              if (needed >= sessionMs) {
+                candidates.push({ isDeleteSession: true, resumeLogId: log.id, pauseLogId: next.id, sessionDurationMs: sessionMs, appliedRed: sessionMs, isPartial: needed > sessionMs })
+              } else {
+                const newTsIso = new Date(new Date(log.timestamp).getTime() + needed).toISOString()
+                candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: false, appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso) })
               }
             }
           }
         }
       }
-
       if (candidates.length > 0) {
-        candidates.sort((a, b) => {
-          if (b.appliedRed !== a.appliedRed) return b.appliedRed - a.appliedRed
-          return (b.benefit ?? 0) - (a.benefit ?? 0)
-        })
+        candidates.sort((a, b) => b.appliedRed !== a.appliedRed ? b.appliedRed - a.appliedRed : (b.benefit ?? 0) - (a.benefit ?? 0))
         const best = candidates[0]
-        if (best.isDeleteSession) {
-          return { type: 'delete_session', resumeLogId: best.resumeLogId, pauseLogId: best.pauseLogId, sessionDurationMs: best.sessionDurationMs, isPartial: best.isPartial }
-        }
+        if (best.isDeleteSession) return { type: 'delete_session', resumeLogId: best.resumeLogId, pauseLogId: best.pauseLogId, sessionDurationMs: best.sessionDurationMs, isPartial: best.isPartial }
         return { logId: best.logId, originalTs: best.originalTs, newTs: best.newTs, deltaMs: best.deltaMs, isPartial: best.isPartial }
       }
     } else {
-      // Need to INCREASE time
       const needed = deltaMs
-      let candidates = []
-
+      const candidates = []
       for (let i = 0; i < logsCopy.length; i++) {
         const log = logsCopy[i]
-        if (log.platform === 'home') {
-          if (log.action === 'pause') {
-            const next = logsCopy[i + 1]
-            const curTs = new Date(log.timestamp).getTime()
-            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T23:59:59').getTime()
-            if (next) {
-              limitTs = new Date(next.timestamp).getTime()
-              if (next.platform === 'office') limitTs -= ($commuteGapMinutes * 60_000)
-            }
-            const inc = limitTs - curTs
-            if (inc > 0) {
-              const appliedInc = Math.min(inc, needed)
-              const newTsIso = new Date(curTs + appliedInc).toISOString()
-              candidates.push({
-                logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
-                deltaMs: needed, isPartial: appliedInc < needed,
-                appliedInc, benefit: getBenefit(log.timestamp, newTsIso)
-              })
-            }
-          } else if (log.action === 'resume') {
-            const prev = logsCopy[i - 1]
-            const curTs = new Date(log.timestamp).getTime()
-            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T06:00:00').getTime()
-            if (prev) {
-              limitTs = new Date(prev.timestamp).getTime()
-              if (prev.platform === 'office') limitTs += ($commuteGapMinutes * 60_000)
-            }
-            const inc = curTs - limitTs
-            if (inc > 0) {
-              const appliedInc = Math.min(inc, needed)
-              const newTsIso = new Date(curTs - appliedInc).toISOString()
-              candidates.push({
-                logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
-                deltaMs: needed, isPartial: appliedInc < needed,
-                appliedInc, benefit: getBenefit(log.timestamp, newTsIso)
-              })
-            }
-          }
+        if (log.platform !== 'home') continue
+        if (log.action === 'pause') {
+          const next = logsCopy[i + 1]
+          const curTs = new Date(log.timestamp).getTime()
+          let limitTs = new Date(log.timestamp.slice(0, 10) + 'T23:59:59').getTime()
+          if (next) { limitTs = new Date(next.timestamp).getTime(); if (next.platform === 'office') limitTs -= commuteGapMins * 60_000 }
+          const inc = limitTs - curTs
+          if (inc > 0) { const appliedInc = Math.min(inc, needed); const newTsIso = new Date(curTs + appliedInc).toISOString(); candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: appliedInc < needed, appliedInc, benefit: getBenefit(log.timestamp, newTsIso) }) }
+        } else if (log.action === 'resume') {
+          const prev = logsCopy[i - 1]
+          const curTs = new Date(log.timestamp).getTime()
+          let limitTs = new Date(log.timestamp.slice(0, 10) + 'T06:00:00').getTime()
+          if (prev) { limitTs = new Date(prev.timestamp).getTime(); if (prev.platform === 'office') limitTs += commuteGapMins * 60_000 }
+          const inc = curTs - limitTs
+          if (inc > 0) { const appliedInc = Math.min(inc, needed); const newTsIso = new Date(curTs - appliedInc).toISOString(); candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: appliedInc < needed, appliedInc, benefit: getBenefit(log.timestamp, newTsIso) }) }
         }
       }
-
       if (candidates.length > 0) {
-        candidates.sort((a, b) => {
-          if (b.appliedInc !== a.appliedInc) return b.appliedInc - a.appliedInc
-          return b.benefit - a.benefit
-        })
+        candidates.sort((a, b) => b.appliedInc !== a.appliedInc ? b.appliedInc - a.appliedInc : b.benefit - a.benefit)
         const best = candidates[0]
         return { logId: best.logId, originalTs: best.originalTs, newTs: best.newTs, deltaMs: best.deltaMs, isPartial: best.isPartial }
       }
     }
 
-    // Ultimate fallback if no suitable pause log was found
     if (deltaMs > 0) {
-      // Suggest TWO brand new logs to start fixing the deficit
       const lastLog = logsCopy[logsCopy.length - 1]
-      let startTs = new Date($selectedDate + 'T17:00:00').getTime()
-      if (lastLog) {
-        startTs = new Date(lastLog.timestamp).getTime()
-        if (lastLog.platform === 'office') {
-          startTs += ($commuteGapMinutes * 60_000)
-        } else {
-          startTs += 60_000 // 1 minute gap from last home log
-        }
-      }
-
-      const limitTs = new Date($selectedDate + 'T23:59:59').getTime()
-      let endTs = startTs + deltaMs
-      let isPartialLocal = false
-      if (endTs > limitTs) {
-        endTs = limitTs
-        isPartialLocal = true
-      }
-
-      return {
-        type: 'create_block_logs',
-        resumeTs: new Date(startTs).toISOString(),
-        pauseTs: new Date(endTs).toISOString(),
-        deltaMs: endTs - startTs,
-        isPartial: isPartialLocal
-      }
+      let startTs = new Date(dateStr + 'T17:00:00').getTime()
+      if (lastLog) { startTs = new Date(lastLog.timestamp).getTime(); startTs += lastLog.platform === 'office' ? commuteGapMins * 60_000 : 60_000 }
+      const limitTs = new Date(dateStr + 'T23:59:59').getTime()
+      let endTs = Math.min(startTs + deltaMs, limitTs)
+      return { type: 'create_block_logs', resumeTs: new Date(startTs).toISOString(), pauseTs: new Date(endTs).toISOString(), deltaMs: endTs - startTs, isPartial: startTs + deltaMs > limitTs }
     }
 
-    // Ultimate fallback for REDUCE time
     const homeLogs = logsCopy.filter(l => l.platform === 'home')
-    if (homeLogs.length === 0) return null 
-    
+    if (!homeLogs.length) return null
     const last = homeLogs[homeLogs.length - 1]
-    const fallbackAdjustmentMs = last.action === 'pause' ? deltaMs : -deltaMs
-    return {
-      logId: last.id,
-      originalTs: last.timestamp,
-      newTs: new Date(new Date(last.timestamp).getTime() + fallbackAdjustmentMs).toISOString(),
-      deltaMs: fallbackAdjustmentMs, // actual adjustment being applied
-      isPartial: false
-    }
-  })()
+    const adj = last.action === 'pause' ? deltaMs : -deltaMs
+    return { logId: last.id, originalTs: last.timestamp, newTs: new Date(new Date(last.timestamp).getTime() + adj).toISOString(), deltaMs: adj, isPartial: false }
+  }
+
+  // Per-day log adjustment suggestion (thin reactive wrapper)
+  $: logAdjustmentSuggestion = showRebalancing && $selectedDayLogs.length > 0
+    ? computeDaySuggestion([...$selectedDayLogs].sort(byTs), $selectedDate, rebalancing, rebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
+    : null
 
   // Unified sorted table rows: existing logs interleaved with suggestion rows
   $: tableRows = (() => {
@@ -755,6 +637,115 @@
     showToast('Session deleted', 'success')
   }
 
+  // ── Apply All / Revert All ───────────────────────────────────
+  let hasSnapshot = !!localStorage.getItem('whl_rebal_snapshot')
+
+  async function applyAllRebalance() {
+    if (!rebalancing || !showRebalancing) return
+    const maxMs = $maximumDailyHours * 3_600_000
+    const commuteGapMins = $commuteGapMinutes
+
+    // Snapshot affected logs before touching anything
+    const affectedKeys = new Set([...Object.keys(rebalMap), ...(rebalancing.stillAboveMax || [])])
+    const snapshot = {
+      savedAt: new Date().toISOString(),
+      month: `${calYear}-${String(calMonth).padStart(2, '0')}`,
+      dateKeys: [...affectedKeys],
+      logs: $logs.filter(l => affectedKeys.has(l.date_key))
+    }
+    localStorage.setItem('whl_rebal_snapshot', JSON.stringify(snapshot))
+    hasSnapshot = true
+
+    // Compute suggestion for every affected day and collect DB ops
+    const currentLogs = $logs  // freeze current state for suggestion computation
+    const updates = []   // { logId, newTs }
+    const inserts = []   // raw log payloads
+    const deletes = []   // log IDs
+
+    for (const dk of [...affectedKeys]) {
+      const dayLogs = currentLogs.filter(l => l.date_key === dk).sort(byTs)
+      if (!dayLogs.length) continue
+      const netMs = computeNetMs(dayLogs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, commuteGapMins, netMs)
+      if (!sugg) continue
+
+      const base = { user_id: $user.id, platform: 'home', date_key: dk }
+      if (sugg.type === 'delete_session') {
+        deletes.push(sugg.resumeLogId, sugg.pauseLogId)
+      } else if (sugg.type === 'create_blocks') {
+        for (const block of sugg.blocks) {
+          if (block.kind === 'new_block') {
+            inserts.push({ ...base, action: 'resume', timestamp: block.resumeTs })
+            inserts.push({ ...base, action: 'pause',  timestamp: block.pauseTs  })
+          } else if (block.kind === 'extend_resume') {
+            updates.push({ logId: block.logId, newTs: block.newTs })
+          }
+        }
+      } else if (sugg.type === 'create_block_logs') {
+        inserts.push({ ...base, action: 'resume', timestamp: sugg.resumeTs })
+        inserts.push({ ...base, action: 'pause',  timestamp: sugg.pauseTs  })
+      } else if (sugg.type === 'create_log') {
+        inserts.push({ ...base, action: sugg.action, timestamp: sugg.newTs })
+      } else if (sugg.logId) {
+        updates.push({ logId: sugg.logId, newTs: sugg.newTs })
+      }
+    }
+
+    isSaving = true
+    const sb = getSupabase()
+
+    for (const { logId, newTs } of updates) {
+      const { error } = await sb.from('work_logs').update({ timestamp: newTs, date_key: newTs.slice(0, 10) }).eq('id', logId)
+      if (error) { showToast('Apply failed: ' + error.message, 'error'); isSaving = false; return }
+    }
+
+    let insertedRows = []
+    if (inserts.length) {
+      const { data, error } = await sb.from('work_logs').insert(inserts).select()
+      if (error) { showToast('Apply failed: ' + error.message, 'error'); isSaving = false; return }
+      insertedRows = data || []
+    }
+
+    if (deletes.length) {
+      const { error } = await sb.from('work_logs').delete().in('id', deletes)
+      if (error) { showToast('Apply failed: ' + error.message, 'error'); isSaving = false; return }
+    }
+
+    logs.update(ls => {
+      let result = ls.filter(l => !deletes.includes(l.id))
+      for (const { logId, newTs } of updates)
+        result = result.map(l => l.id === logId ? { ...l, timestamp: newTs, date_key: newTs.slice(0, 10) } : l)
+      return [...result, ...insertedRows]
+    })
+
+    isSaving = false
+    const parts = []
+    if (updates.length)  parts.push(`${updates.length} edited`)
+    if (inserts.length)  parts.push(`${inserts.length} added`)
+    if (deletes.length)  parts.push(`${deletes.length} deleted`)
+    showToast(`Rebalancing applied (${parts.join(', ')})`, 'success')
+  }
+
+  async function revertAllRebalance() {
+    const stored = localStorage.getItem('whl_rebal_snapshot')
+    if (!stored) { showToast('No snapshot to revert to', 'info'); return }
+    const { dateKeys, logs: snapshotLogs } = JSON.parse(stored)
+
+    isSaving = true
+    const sb = getSupabase()
+    // Delete all current logs for affected date_keys then restore snapshot
+    const { error: delErr } = await sb.from('work_logs').delete().in('date_key', dateKeys)
+    if (delErr) { showToast('Revert failed: ' + delErr.message, 'error'); isSaving = false; return }
+    const { data, error: insErr } = await sb.from('work_logs').insert(snapshotLogs).select()
+    if (insErr) { showToast('Revert failed: ' + insErr.message, 'error'); isSaving = false; return }
+
+    logs.update(ls => [...ls.filter(l => !dateKeys.includes(l.date_key)), ...(data || snapshotLogs)])
+    localStorage.removeItem('whl_rebal_snapshot')
+    hasSnapshot = false
+    isSaving = false
+    showToast('Rebalancing reverted to snapshot', 'success')
+  }
+
   async function applySuggestion() {
     if (!logAdjustmentSuggestion) return
     const sugg = logAdjustmentSuggestion
@@ -874,11 +865,23 @@
               <span class="rebal-hd-icon">&#9878;</span>
               <p class="rebal-hd-title" style="margin: 0; font-size: 1.1rem; font-weight: 600;">Hour Redistribution Plan</p>
             </div>
-            {#if rebalancing.noViolations}
-              <span class="badge badge-success">Balanced</span>
-            {:else}
-              <span class="badge badge-warning">Action Required</span>
-            {/if}
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              {#if rebalancing.noViolations}
+                <span class="badge badge-success">Balanced</span>
+              {:else}
+                <span class="badge badge-warning">Action Required</span>
+              {/if}
+              {#if rebalancing.transfers.length}
+                <button class="btn btn-sm btn-primary" style="font-size: 0.75rem;" on:click={applyAllRebalance} disabled={isSaving}>
+                  ⚡ Apply All
+                </button>
+              {/if}
+              {#if hasSnapshot}
+                <button class="btn btn-sm btn-secondary" style="font-size: 0.75rem;" on:click={revertAllRebalance} disabled={isSaving}>
+                  ↩ Revert
+                </button>
+              {/if}
+            </div>
           </div>
           {#if !rebalancing.noViolations}
             <div class="rebal-violations">
