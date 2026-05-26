@@ -585,6 +585,9 @@
         {#if cell === null}
           <div class="cal-cell cal-cell--empty"></div>
         {:else}
+          {@const effectiveNet = (showRebalancing && rebalMap[cell.key] != null) ? cell.netMs + rebalMap[cell.key] : cell.netMs}
+          {@const effectiveUnderMin = !cell.isOff && effectiveNet > 0 && effectiveNet < $minimumDailyHours * 3_600_000}
+          {@const effectiveAboveMax = !cell.isOff && effectiveNet > $maximumDailyHours * 3_600_000}
           <button
             class="cal-cell"
             class:cal-cell--today={cell.key === todayKey}
@@ -593,9 +596,9 @@
             class:cal-cell--override={cell.hasOverride}
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
-            class:cal-cell--under-min={cell.underMin}
-            class:cal-cell--above-max={cell.aboveMax}
-            class:cal-cell--filtered-out={(filterUnderMin && !cell.underMin) || (filterAboveMax && !cell.aboveMax)}
+            class:cal-cell--under-min={effectiveUnderMin}
+            class:cal-cell--above-max={effectiveAboveMax}
+            class:cal-cell--filtered-out={(filterUnderMin && !effectiveUnderMin) || (filterAboveMax && !effectiveAboveMax)}
             class:cal-cell--rebal-donor={showRebalancing && rebalMap[cell.key] < 0}
             class:cal-cell--rebal-recipient={showRebalancing && rebalMap[cell.key] > 0}
             on:click={() => selectedDate.set(cell.key)}
