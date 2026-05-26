@@ -271,9 +271,23 @@
 
   // Per-day log adjustment suggestion
   $: logAdjustmentSuggestion = (() => {
-    if (!showRebalancing || rebalMap[$selectedDate] == null || $selectedDayLogs.length === 0) return null
-    const deltaMs = rebalMap[$selectedDate]
-    if (deltaMs === 0) return null
+    if (!showRebalancing || $selectedDayLogs.length === 0) return null
+
+    const isStillAboveMax = rebalancing?.stillAboveMax?.includes($selectedDate) ?? false
+    const maxMs = $maximumDailyHours * 3_600_000
+
+    // For still-above-max days the target is always maxMs (covers both the
+    // redistribution portion AND the undistributable excess that must be deleted).
+    let deltaMs
+    if (isStillAboveMax) {
+      deltaMs = -(Math.max(0, selNetMs - maxMs))
+      if (deltaMs === 0) return null
+    } else if (rebalMap[$selectedDate] != null) {
+      deltaMs = rebalMap[$selectedDate]
+      if (deltaMs === 0) return null
+    } else {
+      return null
+    }
 
     const logsCopy = [...$selectedDayLogs].sort(byTs)
 
@@ -677,6 +691,7 @@
             <div class="rebal-section">
               <p class="rebal-section-lbl rebal-lbl-donor">&#128228; Giving hours</p>
               {#each rebalSummary.donors as d}
+                {@const donorExcessMs = Math.max(0, d.newMs - $maximumDailyHours * 3_600_000)}
                 <button class="rebal-row rebal-row--donor"
                   on:click={() => selectedDate.set(d.key)}
                   title="View logs for {fmtKeyShort(d.key)}"
@@ -686,8 +701,15 @@
                     <span class="rebal-orig">{fmtDuration(d.originalMs)}</span>
                     <span class="rebal-arr">&rarr;</span>
                     <span class="rebal-new rebal-new--donor">{fmtDuration(d.newMs)}</span>
+                    {#if donorExcessMs > 0}
+                      <span class="rebal-arr">&rarr;</span>
+                      <span class="rebal-new rebal-new--excess">{fmtDuration($maximumDailyHours * 3_600_000)} ✂</span>
+                    {/if}
                   </div>
                   <span class="rebal-badge rebal-badge--donor">{fmtDuration(d.deltaMs, true)}</span>
+                  {#if donorExcessMs > 0}
+                    <span class="rebal-excess-tag">+{fmtDuration(donorExcessMs)}</span>
+                  {/if}
                   <span class="rebal-view-hint">&#9654; logs</span>
                 </button>
               {/each}
@@ -773,40 +795,80 @@
       {/if}
     </div>
 
-    {#if showRebalancing && rebalMap[$selectedDate] != null}
-      {@const selDelta  = rebalMap[$selectedDate]}
-      {@const selNewNet = selNetMs + selDelta}
-      {@const isDonor   = selDelta < 0}
-      {@const selOt     = selDayIsOff ? selNetMs : selNetMs - ($requiredHours * 3_600_000)}
-      {@const newOt     = selDayIsOff ? selNewNet : selNewNet - ($requiredHours * 3_600_000)}
-      <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : 'rebal-day-banner--recipient'}">
-        <div class="rebal-day-banner-icon">{isDonor ? '📤' : '📥'}</div>
-        <div class="rebal-day-banner-body">
-          <p class="rebal-day-banner-title">
-            {isDonor ? 'This day is giving hours away' : 'This day needs more hours'}
-          </p>
-          <div class="rebal-day-banner-row">
-            <span class="rebal-day-banner-label">Now:</span>
-            <strong class="rebal-day-banner-val">{fmtDuration(selNetMs)}</strong>
-            <span class="rebal-day-banner-arrow">→</span>
-            <span class="rebal-day-banner-label">Target:</span>
-            <strong class="rebal-day-banner-val rebal-day-banner-target">{fmtDuration(selNewNet)}</strong>
-            <span class="rebal-day-banner-badge {isDonor ? 'donor' : 'recipient'}">{fmtDuration(selDelta, true)}</span>
+    {#if showRebalancing}
+      {@const isStillAboveMax = rebalancing?.stillAboveMax?.includes($selectedDate) ?? false}
+      {@const hasRebalDelta   = rebalMap[$selectedDate] != null}
+      {@const selDelta        = rebalMap[$selectedDate] ?? 0}
+      {@const selNewNet       = selNetMs + selDelta}
+      {@const maxMs           = $maximumDailyHours * 3_600_000}
+      {@const excessMs        = Math.max(0, selNewNet - maxMs)}
+      {#if hasRebalDelta || isStillAboveMax}
+        {@const isDonor = selDelta < 0 || isStillAboveMax}
+        {@const finalTarget = isStillAboveMax ? maxMs : selNewNet}
+        {@const selOt = selDayIsOff ? selNetMs : selNetMs - ($requiredHours * 3_600_000)}
+        {@const newOt = selDayIsOff ? finalTarget : finalTarget - ($requiredHours * 3_600_000)}
+        <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : 'rebal-day-banner--recipient'}">
+          <div class="rebal-day-banner-icon">{isDonor ? '📤' : '📥'}</div>
+          <div class="rebal-day-banner-body">
+            <p class="rebal-day-banner-title">
+              {#if isStillAboveMax && excessMs > 0}
+                This day is giving hours away — {fmtDuration(excessMs)} excess must be trimmed
+              {:else if isDonor}
+                This day is giving hours away
+              {:else}
+                This day needs more hours
+              {/if}
+            </p>
+
+            <!-- Flow row: show redistribution step + trim step if still-above-max -->
+            {#if isStillAboveMax && hasRebalDelta && excessMs > 0}
+              <div class="rebal-day-banner-row">
+                <span class="rebal-day-banner-label">Now:</span>
+                <strong class="rebal-day-banner-val">{fmtDuration(selNetMs)}</strong>
+                <span class="rebal-day-banner-arrow">→</span>
+                <span class="rebal-day-banner-label">Redistribute:</span>
+                <strong class="rebal-day-banner-val">{fmtDuration(selNewNet)}</strong>
+                <span class="rebal-day-banner-badge donor">{fmtDuration(selDelta, true)}</span>
+                <span class="rebal-day-banner-arrow">→</span>
+                <span class="rebal-day-banner-label">Trim to max:</span>
+                <strong class="rebal-day-banner-val rebal-day-banner-target">{fmtDuration(maxMs)}</strong>
+                <span class="rebal-day-banner-badge rebal-excess-inline">-{fmtDuration(excessMs)}</span>
+              </div>
+            {:else}
+              <div class="rebal-day-banner-row">
+                <span class="rebal-day-banner-label">Now:</span>
+                <strong class="rebal-day-banner-val">{fmtDuration(selNetMs)}</strong>
+                <span class="rebal-day-banner-arrow">→</span>
+                <span class="rebal-day-banner-label">Target:</span>
+                <strong class="rebal-day-banner-val rebal-day-banner-target">{fmtDuration(finalTarget)}</strong>
+                <span class="rebal-day-banner-badge {isDonor ? 'donor' : 'recipient'}">{fmtDuration(finalTarget - selNetMs, true)}</span>
+              </div>
+            {/if}
+
+            <!-- OT before/after -->
+            <div class="rebal-day-banner-row" style="margin-top: 0.25rem;">
+              <span class="rebal-day-banner-label">OT Before:</span>
+              <strong class="rebal-day-banner-val" style="color: {selOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{selOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(selOt))}</strong>
+              <span class="rebal-day-banner-arrow">→</span>
+              <span class="rebal-day-banner-label">OT After:</span>
+              <strong class="rebal-day-banner-val rebal-day-banner-target" style="color: {newOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{newOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(newOt))}</strong>
+            </div>
+
+            <!-- Excess warning -->
+            {#if isStillAboveMax && excessMs > 0}
+              <div class="rebal-excess-warning">
+                ✂ {fmtDuration(excessMs)} cannot be redistributed — trim the highlighted home log below to reach {fmtDuration(maxMs)}.
+              </div>
+            {/if}
+
+            <p class="rebal-day-banner-hint">
+              {isDonor
+                ? `Adjust the highlighted log entry below to hit ${fmtDuration(finalTarget)}.`
+                : `Adjust the highlighted log entry below to hit ${fmtDuration(finalTarget)}.`}
+            </p>
           </div>
-          <div class="rebal-day-banner-row" style="margin-top: 0.25rem;">
-            <span class="rebal-day-banner-label">OT Before:</span>
-            <strong class="rebal-day-banner-val" style="color: {selOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{selOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(selOt))}</strong>
-            <span class="rebal-day-banner-arrow">→</span>
-            <span class="rebal-day-banner-label">OT After:</span>
-            <strong class="rebal-day-banner-val rebal-day-banner-target" style="color: {newOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{newOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(newOt))}</strong>
-          </div>
-          <p class="rebal-day-banner-hint">
-            {isDonor
-              ? `We suggest adjusting the highlighted log entry below to hit ${fmtDuration(selNewNet)}.`
-              : `We suggest adjusting the highlighted log entry below to hit ${fmtDuration(selNewNet)}.`}
-          </p>
         </div>
-      </div>
+      {/if}
     {/if}
 
     {#if !selDayIsOff && selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
@@ -1119,6 +1181,13 @@
   .rebal-new  { font-weight: 700; font-size: 0.78rem; }
   .rebal-new--donor     { color: hsl(38 95% 55%); }
   .rebal-new--recipient { color: var(--color-ot-pos); }
+  .rebal-new--excess    { color: var(--color-ot-neg); font-weight: 700; }
+  .rebal-excess-tag {
+    font-size: 0.65rem; font-weight: 700;
+    padding: 1px 5px; border-radius: 999px; white-space: nowrap;
+    background: color-mix(in srgb, var(--color-ot-neg) 15%, transparent);
+    color: var(--color-ot-neg);
+  }
 
   .rebal-badge {
     font-size: 0.7rem; font-weight: 700;
@@ -1202,6 +1271,19 @@
   .rebal-day-banner-badge.donor     { background: color-mix(in srgb, hsl(38 95% 55%) 20%, transparent); }
   .rebal-day-banner-badge.recipient { background: color-mix(in srgb, var(--color-ot-pos) 20%, transparent); }
   .rebal-day-banner-hint { font-size: 0.78rem; opacity: 0.8; line-height: 1.4; }
+  .rebal-excess-warning {
+    font-size: 0.78rem; font-weight: 600;
+    padding: 4px 8px; border-radius: 4px; margin-top: 0.25rem;
+    background: color-mix(in srgb, var(--color-ot-neg) 12%, transparent);
+    color: var(--color-ot-neg);
+  }
+  .rebal-excess-inline {
+    font-size: 0.7rem; font-weight: 700;
+    padding: 1px 5px; border-radius: 999px;
+    background: color-mix(in srgb, var(--color-ot-neg) 15%, transparent);
+    color: var(--color-ot-neg);
+    white-space: nowrap;
+  }
 
   .empty-state { text-align: center; color: var(--color-text-muted); padding: 3rem 0; font-size: 0.9rem; }
 
