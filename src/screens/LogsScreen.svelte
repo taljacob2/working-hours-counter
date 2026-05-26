@@ -168,49 +168,49 @@
 
     const transfers = []
 
-    // Recipients: only non-off days below minimum (off days have no required hours)
+    // Pass 1: off-day home hours → under-required working days (first-priority pass).
+    // Off days go first so their surplus is never crowded out by working-day OT donors.
+    for (const donor of days.filter(d => d.isOff && d.currentMs > d.offMs).sort((a, b) => b.currentMs - a.currentMs)) {
+      const floor = donor.offMs
+      while (donor.currentMs > floor) {
+        const rec = days
+          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs)
+          .sort((a, b) => a.currentMs - b.currentMs)[0]
+        if (!rec) break
+        const available = donor.currentMs - floor
+        const needed    = reqMs - rec.currentMs
+        const transfer  = Math.min(available, needed)
+        donor.currentMs -= transfer
+        rec.currentMs   += transfer
+        transfers.push({ from: donor.key, to: rec.key, ms: transfer })
+      }
+    }
+
+    // Pass 2: fix remaining working-day violations (under-min ← above-max / OT donors).
     const recipients = days
       .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs)
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of recipients) {
       while (rec.currentMs < minMs) {
-        // Donor priority:
-        //   1. Non-off days above max (drain to max)
-        //   2. Off days with any home hours (all hours are pure OT)
-        //   3. Non-off days with OT (drain to required)
         const aboveMaxDonors = days
           .filter(d => !d.tappedOut && !d.isOff && d.currentMs > maxMs)
-          .sort((a, b) => b.currentMs - a.currentMs)
-        const offDayDonors = days
-          .filter(d => !d.tappedOut && d.isOff && d.currentMs > d.offMs)
           .sort((a, b) => b.currentMs - a.currentMs)
         const otDonors = days
           .filter(d => !d.tappedOut && !d.isOff && d.currentMs > reqMs && d.currentMs <= maxMs)
           .sort((a, b) => b.currentMs - a.currentMs)
 
-        const donor = aboveMaxDonors[0] || offDayDonors[0] || otDonors[0]
+        const donor = aboveMaxDonors[0] || otDonors[0]
         if (!donor) break
 
-        // Off days: all home hours are donatable (floor = office hours only)
-        // Regular days: drain to max or required, but never below office hours
-        let floor
-        if (donor.isOff) {
-          floor = donor.offMs
-        } else {
-          floor = donor.currentMs > maxMs ? maxMs : reqMs
-          floor = Math.max(floor, donor.offMs)
-        }
+        let floor = donor.currentMs > maxMs ? maxMs : reqMs
+        floor = Math.max(floor, donor.offMs)
 
         const available = donor.currentMs - floor
-        if (available <= 0) {
-          donor.tappedOut = true
-          continue
-        }
+        if (available <= 0) { donor.tappedOut = true; continue }
 
-        const needed = minMs - rec.currentMs
+        const needed   = minMs - rec.currentMs
         const transfer = Math.min(available, needed)
-
         donor.currentMs -= transfer
         rec.currentMs   += transfer
         transfers.push({ from: donor.key, to: rec.key, ms: transfer })
@@ -218,9 +218,9 @@
     }
 
     // Off days are never violations — only check non-off days
-    const stillUnderMin  = days.filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
-    const stillAboveMax  = days.filter(d => !d.isOff && d.currentMs > maxMs).map(d => d.key)
-    const noViolations   = stillUnderMin.length === 0 && stillAboveMax.length === 0
+    const stillUnderMin = days.filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
+    const stillAboveMax = days.filter(d => !d.isOff && d.currentMs > maxMs).map(d => d.key)
+    const noViolations  = stillUnderMin.length === 0 && stillAboveMax.length === 0
 
     return { transfers, stillUnderMin, stillAboveMax, noViolations }
   }
