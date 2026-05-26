@@ -290,14 +290,23 @@
     let originalTs = null
     let isPartial = false
 
+    const getBenefit = (oldTsIso, newTsIso) => {
+      const oldDt = new Date(oldTsIso)
+      const newDt = new Date(newTsIso)
+      const getDist = (dt) => {
+        const center = new Date(dt)
+        center.setHours(13, 30, 0, 0)
+        return Math.abs(dt.getTime() - center.getTime())
+      }
+      return getDist(oldDt) - getDist(newDt)
+    }
+
     if (deltaMs < 0) {
       // Need to REDUCE time
       const needed = -deltaMs
-      let bestLog = null
-      let maxReduction = 0
-      let targetMs = 0
+      let candidates = []
 
-      for (let i = logsCopy.length - 1; i >= 0; i--) {
+      for (let i = 0; i < logsCopy.length; i++) {
         const log = logsCopy[i]
         if (log.platform === 'home') {
           if (log.action === 'pause') {
@@ -306,11 +315,14 @@
               const minAllowedTs = new Date(prev.timestamp).getTime()
               const curTs = new Date(log.timestamp).getTime()
               const red = curTs - minAllowedTs
-              if (red >= needed) {
-                return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs - needed).toISOString(), deltaMs, isPartial: false }
-              }
-              if (red > maxReduction) {
-                maxReduction = red; bestLog = log; targetMs = -red
+              if (red > 0) {
+                const appliedRed = Math.min(red, needed)
+                const newTsIso = new Date(curTs - appliedRed).toISOString()
+                candidates.push({
+                  logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
+                  deltaMs: needed, isPartial: appliedRed < needed,
+                  appliedRed, benefit: getBenefit(log.timestamp, newTsIso)
+                })
               }
             }
           } else if (log.action === 'resume') {
@@ -319,27 +331,34 @@
               const maxAllowedTs = new Date(next.timestamp).getTime()
               const curTs = new Date(log.timestamp).getTime()
               const red = maxAllowedTs - curTs
-              if (red >= needed) {
-                // To reduce duration, push resume LATER
-                return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs + needed).toISOString(), deltaMs, isPartial: false }
-              }
-              if (red > maxReduction) {
-                maxReduction = red; bestLog = log; targetMs = red
+              if (red > 0) {
+                const appliedRed = Math.min(red, needed)
+                const newTsIso = new Date(curTs + appliedRed).toISOString()
+                candidates.push({
+                  logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
+                  deltaMs: needed, isPartial: appliedRed < needed,
+                  appliedRed, benefit: getBenefit(log.timestamp, newTsIso)
+                })
               }
             }
           }
         }
       }
-      if (bestLog && maxReduction > 0) {
-        return { logId: bestLog.id, originalTs: bestLog.timestamp, newTs: new Date(new Date(bestLog.timestamp).getTime() + targetMs).toISOString(), deltaMs: targetMs, isPartial: true }
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => {
+          if (b.appliedRed !== a.appliedRed) return b.appliedRed - a.appliedRed
+          return b.benefit - a.benefit
+        })
+        const best = candidates[0]
+        return { logId: best.logId, originalTs: best.originalTs, newTs: best.newTs, deltaMs: best.deltaMs, isPartial: best.isPartial }
       }
     } else {
-      // Need to INCREASE time (push pause later, or pull resume earlier)
-      let bestLog = null
-      let maxIncrease = 0
-      let targetMs = 0
+      // Need to INCREASE time
+      const needed = deltaMs
+      let candidates = []
 
-      for (let i = logsCopy.length - 1; i >= 0; i--) {
+      for (let i = 0; i < logsCopy.length; i++) {
         const log = logsCopy[i]
         if (log.platform === 'home') {
           if (log.action === 'pause') {
@@ -351,11 +370,14 @@
               if (next.platform === 'office') limitTs -= ($commuteGapMinutes * 60_000)
             }
             const inc = limitTs - curTs
-            if (inc >= deltaMs) {
-              return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs + deltaMs).toISOString(), deltaMs, isPartial: false }
-            }
-            if (inc > maxIncrease) {
-              maxIncrease = inc; bestLog = log; targetMs = inc
+            if (inc > 0) {
+              const appliedInc = Math.min(inc, needed)
+              const newTsIso = new Date(curTs + appliedInc).toISOString()
+              candidates.push({
+                logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
+                deltaMs: needed, isPartial: appliedInc < needed,
+                appliedInc, benefit: getBenefit(log.timestamp, newTsIso)
+              })
             }
           } else if (log.action === 'resume') {
             const prev = logsCopy[i - 1]
@@ -366,18 +388,26 @@
               if (prev.platform === 'office') limitTs += ($commuteGapMinutes * 60_000)
             }
             const inc = curTs - limitTs
-            if (inc >= deltaMs) {
-              // Pull resume EARLIER
-              return { logId: log.id, originalTs: log.timestamp, newTs: new Date(curTs - deltaMs).toISOString(), deltaMs, isPartial: false }
-            }
-            if (inc > maxIncrease) {
-              maxIncrease = inc; bestLog = log; targetMs = -inc // negative moves ts earlier
+            if (inc > 0) {
+              const appliedInc = Math.min(inc, needed)
+              const newTsIso = new Date(curTs - appliedInc).toISOString()
+              candidates.push({
+                logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
+                deltaMs: needed, isPartial: appliedInc < needed,
+                appliedInc, benefit: getBenefit(log.timestamp, newTsIso)
+              })
             }
           }
         }
       }
-      if (bestLog && maxIncrease > 0) {
-        return { logId: bestLog.id, originalTs: bestLog.timestamp, newTs: new Date(new Date(bestLog.timestamp).getTime() + targetMs).toISOString(), deltaMs: maxIncrease, isPartial: true }
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => {
+          if (b.appliedInc !== a.appliedInc) return b.appliedInc - a.appliedInc
+          return b.benefit - a.benefit
+        })
+        const best = candidates[0]
+        return { logId: best.logId, originalTs: best.originalTs, newTs: best.newTs, deltaMs: best.deltaMs, isPartial: best.isPartial }
       }
     }
 
