@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -22,7 +22,7 @@
   $: calMonth = $calCursor.getMonth() + 1
 
   $: calDays = buildCalendar(calYear, calMonth)
-  $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays)
+  $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
   $: daysLogged = loggedDaysInMonth($logs, calYear, calMonth).length
 
   function buildCalendar(year, month) {
@@ -38,13 +38,14 @@
       const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? now : (isOpen ? null : null))
       const reqMs  = $requiredHours * 3_600_000
       const minMs  = $minimumDailyHours * 3_600_000
-      const dayIsOff = isOffDay(key, $offDays)
+      const dayIsOff = isOffDay(key, $offDays, $dayOverrides)
+      const hasOverride = $dayOverrides[key] != null
       const otMs   = dl.length > 0 ? (dayIsOff ? netMs : netMs - reqMs) : null
       const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? now : null)
       const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? now : null)
       const underMin = !dayIsOff && netMs > 0 && netMs < minMs
       const aboveMax = !dayIsOff && netMs > $maximumDailyHours * 3_600_000
-      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff })
+      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff, hasOverride })
     }
     return cells
   }
@@ -135,8 +136,9 @@
   }
 
   // ── Selected day metrics ─────────────────────────────────────
-  $: selNetMs  = computeNetMs($selectedDayLogs, $selectedDate === todayKey ? now : null)
-  $: selOtMs   = $selectedDayLogs.length > 0 ? selNetMs - $requiredHours * 3_600_000 : null
+  $: selNetMs    = computeNetMs($selectedDayLogs, $selectedDate === todayKey ? now : null)
+  $: selDayIsOff = isOffDay($selectedDate, $offDays, $dayOverrides)
+  $: selOtMs     = $selectedDayLogs.length > 0 ? (selDayIsOff ? selNetMs : selNetMs - $requiredHours * 3_600_000) : null
 
   // ── Format helpers ───────────────────────────────────────────
   function fmtTs(ts) {
@@ -156,8 +158,8 @@
     return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
   }
 
-  function suggestRebalancing(cells, minMs, maxMs, reqMs, offDays = []) {
-    const dayIsOff = key => isOffDay(key, offDays)
+  function suggestRebalancing(cells, minMs, maxMs, reqMs, offDays = [], dayOverrides = {}) {
+    const dayIsOff = key => isOffDay(key, offDays, dayOverrides)
 
     // Mutable working copies — only logged days matter
     const days = cells
@@ -229,7 +231,8 @@
         $minimumDailyHours * 3_600_000,
         $maximumDailyHours * 3_600_000,
         $requiredHours    * 3_600_000,
-        $offDays
+        $offDays,
+        $dayOverrides
       )
     : null
 
@@ -472,6 +475,28 @@
     }
   })()
 
+  // ── Day overrides (per-date work/off toggle) ─────────────────
+  async function setDayOverride(dk, type) {
+    const updated = { ...$dayOverrides, [dk]: type }
+    dayOverrides.set(updated)
+    localStorage.setItem('whl_day_overrides', JSON.stringify(updated))
+    const sb = getSupabase()
+    const { error } = await sb.from('work_settings').upsert([{ key: 'dayOverrides', value: JSON.stringify(updated) }])
+    if (error) showToast('Failed to save day override', 'error')
+    else showToast(type === 'off' ? 'Marked as off day' : 'Marked as work day', 'success')
+  }
+
+  async function removeDayOverride(dk) {
+    const updated = { ...$dayOverrides }
+    delete updated[dk]
+    dayOverrides.set(updated)
+    localStorage.setItem('whl_day_overrides', JSON.stringify(updated))
+    const sb = getSupabase()
+    const { error } = await sb.from('work_settings').upsert([{ key: 'dayOverrides', value: JSON.stringify(updated) }])
+    if (error) showToast('Failed to remove day override', 'error')
+    else showToast('Reverted to default', 'info')
+  }
+
   async function applyCreateLog(action, newTs) {
     isSaving = true
     const sb = getSupabase()
@@ -565,6 +590,7 @@
             class:cal-cell--today={cell.key === todayKey}
             class:cal-cell--selected={cell.key === $selectedDate}
             class:cal-cell--off-day={cell.isOff}
+            class:cal-cell--override={cell.hasOverride}
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
             class:cal-cell--under-min={cell.underMin}
@@ -719,12 +745,25 @@
       </div>
     </div>
 
+    <div class="day-type-row">
+      {#if selDayIsOff}
+        <span class="day-type-badge day-type-badge--off">🏖 Off Day{$dayOverrides[$selectedDate] != null ? ' (override)' : ''}</span>
+        <button class="btn btn-sm btn-secondary" on:click={() => setDayOverride($selectedDate, 'work')}>Mark as Work Day</button>
+      {:else}
+        <span class="day-type-badge day-type-badge--work">💼 Work Day{$dayOverrides[$selectedDate] != null ? ' (override)' : ''}</span>
+        <button class="btn btn-sm btn-secondary" on:click={() => setDayOverride($selectedDate, 'off')}>Mark as Off Day</button>
+      {/if}
+      {#if $dayOverrides[$selectedDate] != null}
+        <button class="btn btn-sm btn-secondary" on:click={() => removeDayOverride($selectedDate)}>× Revert to default</button>
+      {/if}
+    </div>
+
     {#if showRebalancing && rebalMap[$selectedDate] != null}
       {@const selDelta  = rebalMap[$selectedDate]}
       {@const selNewNet = selNetMs + selDelta}
       {@const isDonor   = selDelta < 0}
-      {@const selOt     = selNetMs - ($requiredHours * 3_600_000)}
-      {@const newOt     = selNewNet - ($requiredHours * 3_600_000)}
+      {@const selOt     = selDayIsOff ? selNetMs : selNetMs - ($requiredHours * 3_600_000)}
+      {@const newOt     = selDayIsOff ? selNewNet : selNewNet - ($requiredHours * 3_600_000)}
       <div class="rebal-day-banner {isDonor ? 'rebal-day-banner--donor' : 'rebal-day-banner--recipient'}">
         <div class="rebal-day-banner-icon">{isDonor ? '📤' : '📥'}</div>
         <div class="rebal-day-banner-body">
@@ -755,7 +794,7 @@
       </div>
     {/if}
 
-    {#if selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
+    {#if !selDayIsOff && selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
       <div class="min-hours-warning">
         ⚠️ You logged <strong>{fmtDuration(selNetMs)}</strong>, which is below your minimum daily target of <strong>{$minimumDailyHours}h</strong>.
       </div>
@@ -970,6 +1009,7 @@
   .cal-cell--filtered-out { opacity: 0.15; pointer-events: none; }
   .cal-cell--off-day { background: color-mix(in srgb, var(--color-text-muted) 6%, var(--color-surface-2)); }
   .cal-cell--off-day .cal-day-num { color: var(--color-text-muted); }
+  .cal-cell--override { outline: 1.5px dashed var(--color-primary); outline-offset: -2px; }
   .active-filter     { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
   .active-filter-max { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
   .cal-day-num { font-size: 0.9rem; font-weight: 600; }
@@ -1078,6 +1118,22 @@
   .rebal-footer--ok   { color: var(--color-ot-pos); background: color-mix(in srgb, var(--color-ot-pos) 6%, transparent); }
   .rebal-footer--warn { color: var(--color-ot-neg); background: color-mix(in srgb, var(--color-ot-neg) 6%, transparent); }
   .rebal-footer-detail { font-size: 0.72rem; margin-top: 2px; opacity: 0.85; }
+
+  /* Day type row */
+  .day-type-row {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.375rem 0.625rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    font-size: 0.8rem;
+  }
+  .day-type-badge {
+    font-size: 0.78rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .day-type-badge--off  { background: color-mix(in srgb, var(--color-text-muted) 14%, transparent); color: var(--color-text-muted); }
+  .day-type-badge--work { background: color-mix(in srgb, var(--color-primary) 12%, transparent); color: var(--color-primary); }
 
   /* Day panel */
   .day-panel { display: flex; flex-direction: column; gap: 1rem; }

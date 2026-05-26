@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat, loading, theme, offDays } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat, loading, theme, offDays, dayOverrides } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
 
   import Spinner     from './components/Spinner.svelte'
@@ -65,6 +65,11 @@
       const offDaysLocal = localStorage.getItem('whl_off_days')
       const offDaysRaw = offDaysVal ?? offDaysLocal ?? '[0,6]'
       try { offDays.set(JSON.parse(offDaysRaw)) } catch { offDays.set([0, 6]) }
+
+      const dayOverridesVal = settings?.find(s => s.key === 'dayOverrides')?.value
+      const dayOverridesLocal = localStorage.getItem('whl_day_overrides')
+      const dayOverridesRaw = dayOverridesVal ?? dayOverridesLocal ?? '{}'
+      try { dayOverrides.set(JSON.parse(dayOverridesRaw)) } catch { dayOverrides.set({}) }
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

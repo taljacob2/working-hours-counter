@@ -58,8 +58,13 @@ export function monthBounds(year, month) {
   return { start, end }
 }
 
-/** Return true if a YYYY-MM-DD date key falls on an off day (offDays: array of 0=Sun…6=Sat) */
-export function isOffDay(dk, offDays) {
+/**
+ * Return true if a YYYY-MM-DD date key is an off day.
+ * dayOverrides (object keyed by date) takes precedence over the weekday-based offDays array.
+ */
+export function isOffDay(dk, offDays, dayOverrides = {}) {
+  if (dayOverrides[dk] === 'work') return false
+  if (dayOverrides[dk] === 'off')  return true
   if (!offDays || offDays.length === 0) return false
   return offDays.includes(new Date(dk + 'T12:00:00').getDay())
 }
@@ -79,7 +84,7 @@ export function loggedDaysInMonth(logs, year, month) {
  * Only days that have at least one log and are <= today count.
  * Off days (by day-of-week) count all logged hours as pure OT (no required deduction).
  */
-export function monthCumulativeOtMs(logs, year, month, requiredHoursPerDay, offDays = []) {
+export function monthCumulativeOtMs(logs, year, month, requiredHoursPerDay, offDays = [], dayOverrides = {}) {
   const reqMs = requiredHoursPerDay * 3_600_000
   const todayKey = dateKey()
   const days = loggedDaysInMonth(logs, year, month).filter(k => k <= todayKey)
@@ -87,7 +92,7 @@ export function monthCumulativeOtMs(logs, year, month, requiredHoursPerDay, offD
   for (const dk of days) {
     const dayLogs = logs.filter(l => l.date_key === dk).sort(byTs)
     const net = computeNetMs(dayLogs, dk === todayKey ? new Date() : null)
-    total += isOffDay(dk, offDays) ? net : net - reqMs
+    total += isOffDay(dk, offDays, dayOverrides) ? net : net - reqMs
   }
   return total
 }
