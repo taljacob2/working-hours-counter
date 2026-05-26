@@ -558,9 +558,17 @@
               <span class="badge badge-warning">Action Required</span>
             {/if}
           </div>
-          <p class="info-text" style="margin: 0; font-size: 0.85rem;">
-            Transferring hours between days. Monthly OT is unaffected: <strong><span class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</span></strong>
-          </p>
+          <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; background: var(--bg-color); padding: 0.75rem; border-radius: 6px; width: 100%; border: 1px solid var(--border-color); align-items: center;">
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Total Monthly OT Before</span>
+              <strong style="font-size: 1.1rem;" class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</strong>
+            </div>
+            <div style="color: var(--text-muted); font-size: 1.2rem;">&rarr;</div>
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Total Monthly OT After</span>
+              <strong style="font-size: 1.1rem;" class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</strong>
+            </div>
+          </div>
           <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
         </div>
 
