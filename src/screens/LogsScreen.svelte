@@ -253,36 +253,36 @@
 
     const logsCopy = [...$selectedDayLogs].sort(byTs)
 
-    const homeLogs = logsCopy.filter(l => l.platform === 'home')
-    if (homeLogs.length === 0 && deltaMs > 0) {
-      // Need to create a new HOME block because there are none to extend
-      const lastLog = logsCopy[logsCopy.length - 1]
-      let startTs = new Date($selectedDate + 'T17:00:00').getTime()
-      if (lastLog) {
-        startTs = new Date(lastLog.timestamp).getTime()
-        if (lastLog.platform === 'office') {
-          startTs += ($commuteGapMinutes * 60_000)
-        }
+    // Check if there is an open home resume
+    let openHomeResume = null
+    for (const l of logsCopy) {
+      if (l.platform === 'home') {
+        if (l.action === 'resume') openHomeResume = l
+        else if (l.action === 'pause') openHomeResume = null
+      }
+    }
+
+    // 1. If we need to ADD time, and we have an open home resume, suggest a pause to close it
+    if (deltaMs > 0 && openHomeResume) {
+      const curTs = new Date(openHomeResume.timestamp).getTime()
+      let limitTs = new Date($selectedDate + 'T23:59:59').getTime()
+      
+      const nextOffice = logsCopy.find(l => l.timestamp > openHomeResume.timestamp && l.platform === 'office')
+      if (nextOffice) {
+        limitTs = new Date(nextOffice.timestamp).getTime() - ($commuteGapMinutes * 60_000)
       }
       
-      const limitTs = new Date($selectedDate + 'T23:59:59').getTime()
-      let endTs = startTs + deltaMs
-      let isPartialLocal = false
-      if (endTs > limitTs) {
-        endTs = limitTs
-        isPartialLocal = true
-      }
-      
-      if (endTs > startTs) {
+      const maxInc = limitTs - curTs
+      const inc = Math.min(deltaMs, maxInc)
+      if (inc > 0) {
         return {
-          type: 'create_block',
-          newStartTs: new Date(startTs).toISOString(),
-          newEndTs: new Date(endTs).toISOString(),
-          deltaMs: endTs - startTs,
-          isPartial: isPartialLocal
+          type: 'create_log',
+          action: 'pause',
+          newTs: new Date(curTs + inc).toISOString(),
+          deltaMs: inc,
+          isPartial: inc < deltaMs
         }
       }
-      return null
     }
 
     let targetLogId = null
@@ -382,31 +382,73 @@
     }
 
     // Ultimate fallback if no suitable pause log was found
-    if (!targetLogId) {
-      // Fallback to the last HOME log 
-      const homeLogs = logsCopy.filter(l => l.platform === 'home')
-      if (homeLogs.length === 0) return null // Can't adjust if no home logs
-      
-      const last = homeLogs[homeLogs.length - 1]
-      targetLogId = last.id
-      originalTs = last.timestamp
-      adjustmentMs = last.action === 'pause' ? deltaMs : -deltaMs
-      isPartial = false // brute force, might cross
+    if (deltaMs > 0) {
+      // Suggest TWO brand new logs to start fixing the deficit
+      const lastLog = logsCopy[logsCopy.length - 1]
+      let startTs = new Date($selectedDate + 'T17:00:00').getTime()
+      if (lastLog) {
+        startTs = new Date(lastLog.timestamp).getTime()
+        if (lastLog.platform === 'office') {
+          startTs += ($commuteGapMinutes * 60_000)
+        } else {
+          startTs += 60_000 // 1 minute gap from last home log
+        }
+      }
+
+      const limitTs = new Date($selectedDate + 'T23:59:59').getTime()
+      let endTs = startTs + deltaMs
+      let isPartialLocal = false
+      if (endTs > limitTs) {
+        endTs = limitTs
+        isPartialLocal = true
+      }
+
+      return {
+        type: 'create_block_logs',
+        resumeTs: new Date(startTs).toISOString(),
+        pauseTs: new Date(endTs).toISOString(),
+        deltaMs: endTs - startTs,
+        isPartial: isPartialLocal
+      }
     }
 
-    const newTs = new Date(new Date(originalTs).getTime() + adjustmentMs)
+    // Ultimate fallback for REDUCE time
+    const homeLogs = logsCopy.filter(l => l.platform === 'home')
+    if (homeLogs.length === 0) return null 
+    
+    const last = homeLogs[homeLogs.length - 1]
+    const fallbackAdjustmentMs = last.action === 'pause' ? deltaMs : -deltaMs
     return {
-      logId: targetLogId,
-      originalTs,
-      newTs: newTs.toISOString(),
-      deltaMs: adjustmentMs, // actual adjustment being applied
-      isPartial
+      logId: last.id,
+      originalTs: last.timestamp,
+      newTs: new Date(new Date(last.timestamp).getTime() + fallbackAdjustmentMs).toISOString(),
+      deltaMs: fallbackAdjustmentMs, // actual adjustment being applied
+      isPartial: false
     }
   })()
 
+  async function applyCreateLog(action, newTs) {
+    isSaving = true
+    const sb = getSupabase()
+    const payload = {
+      user_id: $user.id,
+      timestamp: newTs,
+      platform: 'home',
+      action,
+      date_key: $selectedDate
+    }
+    const { data, error } = await sb.from('work_logs').insert(payload).select().single()
+    isSaving = false
+    if (error) { showToast('Error creating log: ' + error.message, 'error'); return }
+    logs.update(ls => [...ls, data])
+    showToast(`Rebalance ${action} log created`, 'success')
+  }
+
   async function applySuggestion() {
-    if (!logAdjustmentSuggestion || logAdjustmentSuggestion.type === 'create_block') return
-    const { logId, newTs } = logAdjustmentSuggestion
+    if (!logAdjustmentSuggestion) return
+    const sugg = logAdjustmentSuggestion
+
+    const { logId, newTs } = sugg
     isSaving = true
     const sb = getSupabase()
     const payload = {
@@ -418,42 +460,6 @@
     if (error) { showToast('Update failed: ' + error.message, 'error'); return }
     logs.update(ls => ls.map(l => l.id === logId ? { ...l, ...payload } : l))
     showToast('Log adjusted for rebalancing', 'success')
-  }
-
-  async function applyCreateBlock() {
-    const sugg = logAdjustmentSuggestion
-    if (!sugg || sugg.type !== 'create_block') return
-    
-    isSaving = true
-    const sb = getSupabase()
-    
-    const log1 = {
-      user_id: $user.id,
-      timestamp: sugg.newStartTs,
-      platform: 'home',
-      action: 'resume',
-      date_key: $selectedDate
-    }
-    
-    const log2 = {
-      user_id: $user.id,
-      timestamp: sugg.newEndTs,
-      platform: 'home',
-      action: 'pause',
-      date_key: $selectedDate
-    }
-    
-    const p1 = sb.from('work_logs').insert(log1).select().single()
-    const p2 = sb.from('work_logs').insert(log2).select().single()
-    
-    const [r1, r2] = await Promise.all([p1, p2])
-    isSaving = false
-    if (r1.error || r2.error) {
-      showToast('Error creating block: ' + (r1.error || r2.error).message, 'error')
-    } else {
-      logs.update(ls => [...ls, r1.data, r2.data])
-      showToast('Rebalance block created', 'success')
-    }
   }
 </script>
 
@@ -767,19 +773,43 @@
               </tr>
             {/each}
 
-            {#if logAdjustmentSuggestion?.type === 'create_block'}
+            {#if logAdjustmentSuggestion?.type === 'create_block_logs'}
               <tr class="suggested-row">
                 <td class="tabnum" style="min-width: 85px;">
-                  <div style="display: flex; flex-direction: column; gap: 2px;">
-                    <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newStartTs)}</strong>
-                    <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newEndTs)}</strong>
-                  </div>
+                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong>
                 </td>
                 <td><span class="pill pill-home">home</span></td>
-                <td><span class="pill pill-muted">new block</span></td>
+                <td><span class="pill pill-resume">resume</span></td>
                 <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
                 <td style="display: flex; gap: 4px;">
-                  <button class="btn btn-sm btn-primary" on:click={applyCreateBlock}>
+                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('resume', logAdjustmentSuggestion.resumeTs)}>
+                    ✨ Apply
+                  </button>
+                </td>
+              </tr>
+              <tr class="suggested-row">
+                <td class="tabnum" style="min-width: 85px;">
+                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.pauseTs)}</strong>
+                </td>
+                <td><span class="pill pill-home">home</span></td>
+                <td><span class="pill pill-pause">pause</span></td>
+                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                <td style="display: flex; gap: 4px;">
+                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('pause', logAdjustmentSuggestion.pauseTs)}>
+                    ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
+                  </button>
+                </td>
+              </tr>
+            {:else if logAdjustmentSuggestion?.type === 'create_log'}
+              <tr class="suggested-row">
+                <td class="tabnum" style="min-width: 85px;">
+                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newTs)}</strong>
+                </td>
+                <td><span class="pill pill-home">home</span></td>
+                <td><span class="pill pill-{logAdjustmentSuggestion.action}">{logAdjustmentSuggestion.action}</span></td>
+                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                <td style="display: flex; gap: 4px;">
+                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog(logAdjustmentSuggestion.action, logAdjustmentSuggestion.newTs)}>
                     ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
                   </button>
                 </td>
