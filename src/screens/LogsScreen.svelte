@@ -313,12 +313,19 @@
     }
     const eveningCap = Math.max(0, dayEnd - eveningStart)
 
-    // Morning slot: before first log (- commute gap if office, else 1 min)
+    // Morning slot: before first log
+    // If first log is a home resume, extend it backward instead of creating a new block
     let morningEnd = new Date(dateStr + 'T09:00:00').getTime()
+    let morningFirstHomeResume = null
     if (sortedLogs.length > 0) {
       const first   = sortedLogs[0]
       const firstTs = new Date(first.timestamp).getTime()
-      morningEnd = first.platform === 'office' ? firstTs - commuteMs : firstTs - 60_000
+      if (first.platform === 'home' && first.action === 'resume') {
+        morningEnd = firstTs
+        morningFirstHomeResume = first
+      } else {
+        morningEnd = first.platform === 'office' ? firstTs - commuteMs : firstTs - 60_000
+      }
     }
     const morningCap = Math.max(0, morningEnd - dayStart)
 
@@ -328,6 +335,7 @@
     if (eveningCap > 0 && remaining > 0) {
       const take = Math.min(eveningCap, remaining)
       blocks.push({
+        kind:       'new_block',
         resumeTs:   new Date(eveningStart).toISOString(),
         pauseTs:    new Date(eveningStart + take).toISOString(),
         durationMs: take
@@ -337,11 +345,22 @@
 
     if (morningCap > 0 && remaining > 0) {
       const take = Math.min(morningCap, remaining)
-      blocks.push({
-        resumeTs:   new Date(morningEnd - take).toISOString(),
-        pauseTs:    new Date(morningEnd).toISOString(),
-        durationMs: take
-      })
+      if (morningFirstHomeResume) {
+        blocks.push({
+          kind:       'extend_resume',
+          logId:      morningFirstHomeResume.id,
+          originalTs: morningFirstHomeResume.timestamp,
+          newTs:      new Date(morningEnd - take).toISOString(),
+          durationMs: take
+        })
+      } else {
+        blocks.push({
+          kind:       'new_block',
+          resumeTs:   new Date(morningEnd - take).toISOString(),
+          pauseTs:    new Date(morningEnd).toISOString(),
+          durationMs: take
+        })
+      }
       remaining -= take
     }
 
@@ -436,33 +455,52 @@
           if (log.action === 'pause') {
             const prev = logsCopy[i - 1]
             if (prev && prev.action === 'resume' && prev.platform === 'home') {
-              const minAllowedTs = new Date(prev.timestamp).getTime()
-              const curTs = new Date(log.timestamp).getTime()
-              const red = curTs - minAllowedTs
-              if (red > 0) {
-                const appliedRed = Math.min(red, needed)
-                const newTsIso = new Date(curTs - appliedRed).toISOString()
-                candidates.push({
-                  logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
-                  deltaMs: needed, isPartial: appliedRed < needed,
-                  appliedRed, benefit: getBenefit(log.timestamp, newTsIso)
-                })
+              const resumeTs = new Date(prev.timestamp).getTime()
+              const curTs    = new Date(log.timestamp).getTime()
+              const sessionMs = curTs - resumeTs
+              if (sessionMs > 0) {
+                if (needed >= sessionMs) {
+                  // Deleting the whole session is cleaner than a zero-duration result
+                  candidates.push({
+                    isDeleteSession: true,
+                    resumeLogId: prev.id, pauseLogId: log.id,
+                    sessionDurationMs: sessionMs,
+                    appliedRed: sessionMs,
+                    isPartial: needed > sessionMs
+                  })
+                } else {
+                  const newTsIso = new Date(curTs - needed).toISOString()
+                  candidates.push({
+                    logId: log.id, originalTs: log.timestamp, newTs: newTsIso,
+                    deltaMs: needed, isPartial: false,
+                    appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso)
+                  })
+                }
               }
             }
           } else if (log.action === 'resume') {
             const next = logsCopy[i + 1]
             if (next && next.action === 'pause' && next.platform === 'home') {
-              const maxAllowedTs = new Date(next.timestamp).getTime()
-              const curTs = new Date(log.timestamp).getTime()
-              const red = maxAllowedTs - curTs
-              if (red > 0) {
-                const appliedRed = Math.min(red, needed)
-                const newTsIso = new Date(curTs + appliedRed).toISOString()
-                candidates.push({
-                  logId: log.id, originalTs: log.timestamp, newTs: newTsIso, 
-                  deltaMs: needed, isPartial: appliedRed < needed,
-                  appliedRed, benefit: getBenefit(log.timestamp, newTsIso)
-                })
+              const curTs   = new Date(log.timestamp).getTime()
+              const pauseTs = new Date(next.timestamp).getTime()
+              const sessionMs = pauseTs - curTs
+              if (sessionMs > 0) {
+                if (needed >= sessionMs) {
+                  candidates.push({
+                    isDeleteSession: true,
+                    resumeLogId: log.id, pauseLogId: next.id,
+                    sessionDurationMs: sessionMs,
+                    appliedRed: sessionMs,
+                    isPartial: needed > sessionMs
+                  })
+                } else {
+                  const newTsIso = new Date(curTs + needed).toISOString()
+                  candidates.push({
+                    logId: log.id, originalTs: log.timestamp, newTs: newTsIso,
+                    deltaMs: needed, isPartial: false,
+                    appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso)
+                  })
+                }
               }
             }
           }
@@ -472,9 +510,12 @@
       if (candidates.length > 0) {
         candidates.sort((a, b) => {
           if (b.appliedRed !== a.appliedRed) return b.appliedRed - a.appliedRed
-          return b.benefit - a.benefit
+          return (b.benefit ?? 0) - (a.benefit ?? 0)
         })
         const best = candidates[0]
+        if (best.isDeleteSession) {
+          return { type: 'delete_session', resumeLogId: best.resumeLogId, pauseLogId: best.pauseLogId, sessionDurationMs: best.sessionDurationMs, isPartial: best.isPartial }
+        }
         return { logId: best.logId, originalTs: best.originalTs, newTs: best.newTs, deltaMs: best.deltaMs, isPartial: best.isPartial }
       }
     } else {
@@ -581,6 +622,64 @@
     }
   })()
 
+  // Unified sorted table rows: existing logs interleaved with suggestion rows
+  $: tableRows = (() => {
+    const sugg = logAdjustmentSuggestion
+    const rows = []
+
+    // Build lookup maps from the current suggestion
+    const extendResumeMap = {}  // logId → { newTs, durationMs }
+    const deleteSessionSet = new Set()
+
+    if (sugg?.type === 'create_blocks') {
+      for (const block of sugg.blocks) {
+        if (block.kind === 'extend_resume') extendResumeMap[block.logId] = block
+      }
+    } else if (sugg?.type === 'delete_session') {
+      deleteSessionSet.add(sugg.resumeLogId)
+      deleteSessionSet.add(sugg.pauseLogId)
+    }
+
+    // Existing log rows
+    for (const log of [...$selectedDayLogs].sort(byTs)) {
+      rows.push({
+        kind:          'log',
+        log,
+        isSugg:        sugg?.logId === log.id,
+        extendSugg:    extendResumeMap[log.id] ?? null,
+        isDeleteSugg:  deleteSessionSet.has(log.id),
+        ts:            new Date(log.timestamp).getTime()
+      })
+    }
+
+    // Suggestion-only rows sorted chronologically
+    if (sugg?.type === 'create_blocks') {
+      let blockNum = 0
+      for (const block of sugg.blocks) {
+        if (block.kind !== 'new_block') continue
+        blockNum++
+        const resumeTs = new Date(block.resumeTs).getTime()
+        rows.push({ kind: 'block_header', block, blockNum, ts: resumeTs - 0.5 })
+        rows.push({ kind: 'block_resume', block, ts: resumeTs })
+        rows.push({ kind: 'block_pause',  block, ts: new Date(block.pauseTs).getTime() })
+      }
+    } else if (sugg?.type === 'create_block_logs') {
+      rows.push({ kind: 'new_resume', ts: new Date(sugg.resumeTs).getTime() })
+      rows.push({ kind: 'new_pause',  ts: new Date(sugg.pauseTs).getTime() })
+    } else if (sugg?.type === 'create_log') {
+      rows.push({ kind: 'new_log', ts: new Date(sugg.newTs).getTime() })
+    }
+
+    rows.sort((a, b) => a.ts - b.ts)
+
+    // Partial warning always at end
+    if (sugg?.type === 'create_blocks' && sugg.isPartial) {
+      rows.push({ kind: 'partial_warning', ts: Infinity })
+    }
+
+    return rows
+  })()
+
   // ── Day overrides (per-date work/off toggle) ─────────────────
   async function setDayOverride(dk, type) {
     const updated = { ...$dayOverrides, [dk]: type }
@@ -633,6 +732,27 @@
     logs.update(ls => [...ls, rd, pd])
     showToast('Rebalance block applied', 'success')
     isSaving = false
+  }
+
+  async function applyExtendResume(logId, newTs) {
+    isSaving = true
+    const sb = getSupabase()
+    const payload = { timestamp: newTs, date_key: newTs.slice(0, 10) }
+    const { error } = await sb.from('work_logs').update(payload).eq('id', logId)
+    isSaving = false
+    if (error) { showToast('Update failed: ' + error.message, 'error'); return }
+    logs.update(ls => ls.map(l => l.id === logId ? { ...l, ...payload } : l))
+    showToast('Home session extended for rebalancing', 'success')
+  }
+
+  async function deleteSession(resumeLogId, pauseLogId) {
+    isSaving = true
+    const sb = getSupabase()
+    const { error } = await sb.from('work_logs').delete().in('id', [resumeLogId, pauseLogId])
+    isSaving = false
+    if (error) { showToast('Delete failed: ' + error.message, 'error'); return }
+    logs.update(ls => ls.filter(l => l.id !== resumeLogId && l.id !== pauseLogId))
+    showToast('Session deleted', 'success')
   }
 
   async function applySuggestion() {
@@ -1006,126 +1126,121 @@
             </tr>
           </thead>
           <tbody>
-            {#each $selectedDayLogs as log (log.id)}
-              {@const isSugg = logAdjustmentSuggestion?.logId === log.id}
-              <tr class:editing={$editingLogId === log.id} class:suggested-row={isSugg}>
-                <td class="tabnum" style="min-width: 85px;">
-                  {#if isSugg}
-                    <div style="display: flex; flex-direction: column; gap: 2px;">
-                      <span style="text-decoration: line-through; opacity: 0.5;">{fmtTs(log.timestamp)}</span>
-                      <strong class="cal-delta {logAdjustmentSuggestion.deltaMs > 0 ? 'pos' : 'neg'}">{fmtTs(logAdjustmentSuggestion.newTs)}</strong>
-                    </div>
-                  {:else}
-                    {fmtTs(log.timestamp)}
-                  {/if}
-                </td>
-                <td>
-                  <span class="pill pill-{log.platform === 'office' ? 'office' : 'home'}">{log.platform}</span>
-                </td>
-                <td>
-                  <span class="pill {log.action === 'resume' ? 'pill-live' : 'pill-muted'}">{log.action}</span>
-                </td>
-                {#if $logResolution === 'full'}<td class="tabnum muted">{fmtDate(log.timestamp)}</td>{/if}
-                <td class="note-cell">{log.note || '—'}</td>
-                {#if $logResolution === 'full'}<td class="muted tabnum">{fmtTs(log.created_at)}</td>{/if}
-                <td style="display: flex; gap: 4px;">
-                  {#if isSugg}
-                    <button 
-                      class="btn btn-sm btn-primary" 
-                      style="padding: 2px 8px; font-size: 0.75rem; white-space: nowrap; box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);" 
-                      on:click={applySuggestion} 
-                      disabled={isSaving}
-                    >
-                      {logAdjustmentSuggestion.isPartial ? '✨ Apply (Partial)' : '✨ Apply'}
-                    </button>
-                  {/if}
-                  <button class="btn btn-sm btn-secondary" on:click={() => startEdit(log)}>✏️ Edit</button>
-                </td>
-              </tr>
-            {/each}
-
-            {#if logAdjustmentSuggestion?.type === 'create_blocks'}
-              {#each logAdjustmentSuggestion.blocks as block, i}
-                <tr class="suggested-row">
-                  <td colspan="5" style="padding: 4px 10px; font-size: 0.78rem; font-weight: 600; color: hsl(270 70% 45%); background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2));">
-                    📊 Block {i + 1}: {fmtTs(block.resumeTs)} → {fmtTs(block.pauseTs)}
-                    <span style="font-weight: 400; color: var(--color-text-muted); margin-left: 4px;">({fmtDuration(block.durationMs)})</span>
-                    <button
-                      class="btn btn-sm btn-primary"
-                      style="margin-left: 0.5rem; padding: 1px 8px; font-size: 0.72rem;"
-                      on:click={() => applyBlock(block)}
-                      disabled={isSaving}
-                    >✨ Apply Both</button>
+            {#each tableRows as row (row.kind === 'log' ? row.log.id : row.ts + '_' + row.kind)}
+              {#if row.kind === 'log'}
+                {@const log = row.log}
+                <tr
+                  class:editing={$editingLogId === log.id}
+                  class:suggested-row={row.isSugg || !!row.extendSugg}
+                  class:delete-suggested-row={row.isDeleteSugg}
+                >
+                  <td class="tabnum" style="min-width: 85px;">
+                    {#if row.isSugg}
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span style="text-decoration: line-through; opacity: 0.5;">{fmtTs(log.timestamp)}</span>
+                        <strong class="cal-delta {logAdjustmentSuggestion.deltaMs > 0 ? 'pos' : 'neg'}">{fmtTs(logAdjustmentSuggestion.newTs)}</strong>
+                      </div>
+                    {:else if row.extendSugg}
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span style="text-decoration: line-through; opacity: 0.5;">{fmtTs(log.timestamp)}</span>
+                        <strong class="cal-delta pos">{fmtTs(row.extendSugg.newTs)}</strong>
+                      </div>
+                    {:else}
+                      {fmtTs(log.timestamp)}
+                    {/if}
+                  </td>
+                  <td><span class="pill pill-{log.platform === 'office' ? 'office' : 'home'}">{log.platform}</span></td>
+                  <td><span class="pill {log.action === 'resume' ? 'pill-live' : 'pill-muted'}">{log.action}</span></td>
+                  {#if $logResolution === 'full'}<td class="tabnum muted">{fmtDate(log.timestamp)}</td>{/if}
+                  <td class="note-cell">{log.note || '—'}</td>
+                  {#if $logResolution === 'full'}<td class="muted tabnum">{fmtTs(log.created_at)}</td>{/if}
+                  <td style="display: flex; gap: 4px; flex-wrap: wrap;">
+                    {#if row.isSugg}
+                      <button class="btn btn-sm btn-primary" style="padding: 2px 8px; font-size: 0.75rem; white-space: nowrap; box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);" on:click={applySuggestion} disabled={isSaving}>
+                        {logAdjustmentSuggestion.isPartial ? '✨ Apply (Partial)' : '✨ Apply'}
+                      </button>
+                    {:else if row.extendSugg}
+                      <button class="btn btn-sm btn-primary" style="padding: 2px 8px; font-size: 0.75rem; white-space: nowrap;" on:click={() => applyExtendResume(log.id, row.extendSugg.newTs)} disabled={isSaving}>
+                        ✨ Extend (+{fmtDuration(row.extendSugg.durationMs)})
+                      </button>
+                    {:else if row.isDeleteSugg && log.action === 'resume'}
+                      <button class="btn btn-sm btn-danger" style="padding: 2px 8px; font-size: 0.75rem; white-space: nowrap;" on:click={() => deleteSession(logAdjustmentSuggestion.resumeLogId, logAdjustmentSuggestion.pauseLogId)} disabled={isSaving}>
+                        🗑 Delete session{logAdjustmentSuggestion.isPartial ? ' (Partial)' : ''}
+                      </button>
+                    {/if}
+                    <button class="btn btn-sm btn-secondary" on:click={() => startEdit(log)}>✏️ Edit</button>
                   </td>
                 </tr>
+              {:else if row.kind === 'block_header'}
+                <tr class="suggested-row block-header-row">
+                  <td colspan="5" style="padding: 4px 10px; font-size: 0.78rem; font-weight: 600; color: hsl(270 70% 45%); background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2));">
+                    📊 Block {row.blockNum}: {fmtTs(row.block.resumeTs)} → {fmtTs(row.block.pauseTs)}
+                    <span style="font-weight: 400; color: var(--color-text-muted); margin-left: 4px;">({fmtDuration(row.block.durationMs)})</span>
+                    <button class="btn btn-sm btn-primary" style="margin-left: 0.5rem; padding: 1px 8px; font-size: 0.72rem;" on:click={() => applyBlock(row.block)} disabled={isSaving}>✨ Apply Both</button>
+                  </td>
+                </tr>
+              {:else if row.kind === 'block_resume'}
                 <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(block.resumeTs)}</strong></td>
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(row.block.resumeTs)}</strong></td>
                   <td><span class="pill pill-home">home</span></td>
                   <td><span class="pill pill-live">resume</span></td>
                   <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
                   <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('resume', block.resumeTs)} disabled={isSaving}>Apply</button>
+                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('resume', row.block.resumeTs)} disabled={isSaving}>Apply</button>
                   </td>
                 </tr>
+              {:else if row.kind === 'block_pause'}
                 <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(block.pauseTs)}</strong></td>
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(row.block.pauseTs)}</strong></td>
                   <td><span class="pill pill-home">home</span></td>
                   <td><span class="pill pill-muted">pause</span></td>
                   <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
                   <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('pause', block.pauseTs)} disabled={isSaving}>Apply</button>
+                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('pause', row.block.pauseTs)} disabled={isSaving}>Apply</button>
                   </td>
                 </tr>
-              {/each}
-              {#if logAdjustmentSuggestion.isPartial}
+              {:else if row.kind === 'new_resume'}
+                <tr class="suggested-row">
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong></td>
+                  <td><span class="pill pill-home">home</span></td>
+                  <td><span class="pill pill-live">resume</span></td>
+                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                  <td style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('resume', logAdjustmentSuggestion.resumeTs)}>✨ Apply</button>
+                  </td>
+                </tr>
+              {:else if row.kind === 'new_pause'}
+                <tr class="suggested-row">
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.pauseTs)}</strong></td>
+                  <td><span class="pill pill-home">home</span></td>
+                  <td><span class="pill pill-muted">pause</span></td>
+                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                  <td style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('pause', logAdjustmentSuggestion.pauseTs)}>
+                      ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
+                    </button>
+                  </td>
+                </tr>
+              {:else if row.kind === 'new_log'}
+                <tr class="suggested-row">
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newTs)}</strong></td>
+                  <td><span class="pill pill-home">home</span></td>
+                  <td><span class="pill pill-{logAdjustmentSuggestion.action}">{logAdjustmentSuggestion.action}</span></td>
+                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                  <td style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog(logAdjustmentSuggestion.action, logAdjustmentSuggestion.newTs)}>
+                      ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
+                    </button>
+                  </td>
+                </tr>
+              {:else if row.kind === 'partial_warning'}
                 <tr>
                   <td colspan="5" class="rebal-excess-warning" style="padding: 6px 10px; font-size: 0.78rem;">
                     ⚠ Could only fit {fmtDuration(logAdjustmentSuggestion.totalDeltaMs)} in available time slots — some hours remain unplaced.
                   </td>
                 </tr>
               {/if}
-            {:else if logAdjustmentSuggestion?.type === 'create_block_logs'}
-              <tr class="suggested-row">
-                <td class="tabnum" style="min-width: 85px;">
-                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong>
-                </td>
-                <td><span class="pill pill-home">home</span></td>
-                <td><span class="pill pill-resume">resume</span></td>
-                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                <td style="display: flex; gap: 4px;">
-                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('resume', logAdjustmentSuggestion.resumeTs)}>
-                    ✨ Apply
-                  </button>
-                </td>
-              </tr>
-              <tr class="suggested-row">
-                <td class="tabnum" style="min-width: 85px;">
-                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.pauseTs)}</strong>
-                </td>
-                <td><span class="pill pill-home">home</span></td>
-                <td><span class="pill pill-pause">pause</span></td>
-                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                <td style="display: flex; gap: 4px;">
-                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('pause', logAdjustmentSuggestion.pauseTs)}>
-                    ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
-                  </button>
-                </td>
-              </tr>
-            {:else if logAdjustmentSuggestion?.type === 'create_log'}
-              <tr class="suggested-row">
-                <td class="tabnum" style="min-width: 85px;">
-                  <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newTs)}</strong>
-                </td>
-                <td><span class="pill pill-home">home</span></td>
-                <td><span class="pill pill-{logAdjustmentSuggestion.action}">{logAdjustmentSuggestion.action}</span></td>
-                <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                <td style="display: flex; gap: 4px;">
-                  <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog(logAdjustmentSuggestion.action, logAdjustmentSuggestion.newTs)}>
-                    ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
-                  </button>
-                </td>
-              </tr>
-            {/if}
+            {/each}
           </tbody>
         </table>
       </div>
@@ -1462,6 +1577,8 @@
   .log-table tr:hover td { background: var(--color-surface-2); }
   .log-table tr.editing td { background: var(--color-primary-subtle); }
   .log-table tr.suggested-row td { background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-2)); }
+  .log-table tr.suggested-row.block-header-row td { background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2)); }
+  .log-table tr.delete-suggested-row td { background: color-mix(in srgb, var(--color-ot-neg) 8%, var(--color-surface-2)); }
   .note-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .muted { color: var(--color-text-muted); }
 
