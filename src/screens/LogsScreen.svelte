@@ -186,13 +186,13 @@
       }
     }
 
-    // Pass 2: fix remaining working-day violations (under-min ← above-max / OT donors).
+    // Pass 2: fix remaining working-day deficits (under-required ← above-max / OT donors).
     const recipients = days
-      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs)
+      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs)
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of recipients) {
-      while (rec.currentMs < minMs) {
+      while (rec.currentMs < reqMs) {
         const aboveMaxDonors = days
           .filter(d => !d.tappedOut && !d.isOff && d.currentMs > maxMs)
           .sort((a, b) => b.currentMs - a.currentMs)
@@ -209,7 +209,7 @@
         const available = donor.currentMs - floor
         if (available <= 0) { donor.tappedOut = true; continue }
 
-        const needed   = minMs - rec.currentMs
+        const needed   = reqMs - rec.currentMs
         const transfer = Math.min(available, needed)
         donor.currentMs -= transfer
         rec.currentMs   += transfer
