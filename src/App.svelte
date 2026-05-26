@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, use24HourFormat, loading, theme, offDays, dayOverrides } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
 
   import Spinner     from './components/Spinner.svelte'
