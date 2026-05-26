@@ -299,6 +299,55 @@
     return { donors, recipients }
   })()
 
+  function computeHumanHoursBlocks(sortedLogs, neededMs, dateStr, commuteGapMins) {
+    const commuteMs = commuteGapMins * 60_000
+    const dayStart  = new Date(dateStr + 'T06:00:00').getTime()
+    const dayEnd    = new Date(dateStr + 'T22:00:00').getTime()
+
+    // Evening slot: after last log (+ commute gap if office, else 1 min)
+    let eveningStart = new Date(dateStr + 'T17:00:00').getTime()
+    if (sortedLogs.length > 0) {
+      const last   = sortedLogs[sortedLogs.length - 1]
+      const lastTs = new Date(last.timestamp).getTime()
+      eveningStart = last.platform === 'office' ? lastTs + commuteMs : lastTs + 60_000
+    }
+    const eveningCap = Math.max(0, dayEnd - eveningStart)
+
+    // Morning slot: before first log (- commute gap if office, else 1 min)
+    let morningEnd = new Date(dateStr + 'T09:00:00').getTime()
+    if (sortedLogs.length > 0) {
+      const first   = sortedLogs[0]
+      const firstTs = new Date(first.timestamp).getTime()
+      morningEnd = first.platform === 'office' ? firstTs - commuteMs : firstTs - 60_000
+    }
+    const morningCap = Math.max(0, morningEnd - dayStart)
+
+    const blocks = []
+    let remaining = neededMs
+
+    if (eveningCap > 0 && remaining > 0) {
+      const take = Math.min(eveningCap, remaining)
+      blocks.push({
+        resumeTs:   new Date(eveningStart).toISOString(),
+        pauseTs:    new Date(eveningStart + take).toISOString(),
+        durationMs: take
+      })
+      remaining -= take
+    }
+
+    if (morningCap > 0 && remaining > 0) {
+      const take = Math.min(morningCap, remaining)
+      blocks.push({
+        resumeTs:   new Date(morningEnd - take).toISOString(),
+        pauseTs:    new Date(morningEnd).toISOString(),
+        durationMs: take
+      })
+      remaining -= take
+    }
+
+    return { type: 'create_blocks', blocks, totalDeltaMs: neededMs - remaining, isPartial: remaining > 0 }
+  }
+
   // Per-day log adjustment suggestion
   $: logAdjustmentSuggestion = (() => {
     if (!showRebalancing || $selectedDayLogs.length === 0) return null
@@ -320,6 +369,13 @@
     }
 
     const logsCopy = [...$selectedDayLogs].sort(byTs)
+
+    // Excess-OT recipient days get new blocks at human hours, not backward-extended logs
+    const isExcessOtRec = !isStillAboveMax &&
+      (rebalancing?.excessOtRecipients?.has($selectedDate) ?? false)
+    if (isExcessOtRec && deltaMs > 0) {
+      return computeHumanHoursBlocks(logsCopy, deltaMs, $selectedDate, $commuteGapMinutes)
+    }
 
     // Check if there is an open home resume
     let openHomeResume = null
@@ -450,7 +506,7 @@
           } else if (log.action === 'resume') {
             const prev = logsCopy[i - 1]
             const curTs = new Date(log.timestamp).getTime()
-            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T00:00:00').getTime()
+            let limitTs = new Date(log.timestamp.slice(0, 10) + 'T06:00:00').getTime()
             if (prev) {
               limitTs = new Date(prev.timestamp).getTime()
               if (prev.platform === 'office') limitTs += ($commuteGapMinutes * 60_000)
@@ -562,6 +618,21 @@
     if (error) { showToast('Error creating log: ' + error.message, 'error'); return }
     logs.update(ls => [...ls, data])
     showToast(`Rebalance ${action} log created`, 'success')
+  }
+
+  async function applyBlock(block) {
+    isSaving = true
+    const sb = getSupabase()
+    const base = { user_id: $user.id, platform: 'home', date_key: $selectedDate }
+    const { data: rd, error: re } = await sb.from('work_logs')
+      .insert({ ...base, action: 'resume', timestamp: block.resumeTs }).select().single()
+    if (re) { showToast('Error: ' + re.message, 'error'); isSaving = false; return }
+    const { data: pd, error: pe } = await sb.from('work_logs')
+      .insert({ ...base, action: 'pause', timestamp: block.pauseTs }).select().single()
+    if (pe) { showToast('Error: ' + pe.message, 'error'); isSaving = false; return }
+    logs.update(ls => [...ls, rd, pd])
+    showToast('Rebalance block applied', 'success')
+    isSaving = false
   }
 
   async function applySuggestion() {
@@ -973,7 +1044,47 @@
               </tr>
             {/each}
 
-            {#if logAdjustmentSuggestion?.type === 'create_block_logs'}
+            {#if logAdjustmentSuggestion?.type === 'create_blocks'}
+              {#each logAdjustmentSuggestion.blocks as block, i}
+                <tr class="suggested-row">
+                  <td colspan="5" style="padding: 4px 10px; font-size: 0.78rem; font-weight: 600; color: hsl(270 70% 45%); background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2));">
+                    📊 Block {i + 1}: {fmtTs(block.resumeTs)} → {fmtTs(block.pauseTs)}
+                    <span style="font-weight: 400; color: var(--color-text-muted); margin-left: 4px;">({fmtDuration(block.durationMs)})</span>
+                    <button
+                      class="btn btn-sm btn-primary"
+                      style="margin-left: 0.5rem; padding: 1px 8px; font-size: 0.72rem;"
+                      on:click={() => applyBlock(block)}
+                      disabled={isSaving}
+                    >✨ Apply Both</button>
+                  </td>
+                </tr>
+                <tr class="suggested-row">
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(block.resumeTs)}</strong></td>
+                  <td><span class="pill pill-home">home</span></td>
+                  <td><span class="pill pill-live">resume</span></td>
+                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                  <td style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('resume', block.resumeTs)} disabled={isSaving}>Apply</button>
+                  </td>
+                </tr>
+                <tr class="suggested-row">
+                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(block.pauseTs)}</strong></td>
+                  <td><span class="pill pill-home">home</span></td>
+                  <td><span class="pill pill-muted">pause</span></td>
+                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
+                  <td style="display: flex; gap: 4px;">
+                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('pause', block.pauseTs)} disabled={isSaving}>Apply</button>
+                  </td>
+                </tr>
+              {/each}
+              {#if logAdjustmentSuggestion.isPartial}
+                <tr>
+                  <td colspan="5" class="rebal-excess-warning" style="padding: 6px 10px; font-size: 0.78rem;">
+                    ⚠ Could only fit {fmtDuration(logAdjustmentSuggestion.totalDeltaMs)} in available time slots — some hours remain unplaced.
+                  </td>
+                </tr>
+              {/if}
+            {:else if logAdjustmentSuggestion?.type === 'create_block_logs'}
               <tr class="suggested-row">
                 <td class="tabnum" style="min-width: 85px;">
                   <strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong>
