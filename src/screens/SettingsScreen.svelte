@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, logs, screen, user, showToast, loading } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -18,6 +18,15 @@
 
   let use24Local = true
   use24HourFormat.subscribe(v => use24Local = v)
+
+  const DAY_OPTIONS = [['Sun', 0], ['Mon', 1], ['Tue', 2], ['Wed', 3], ['Thu', 4], ['Fri', 5], ['Sat', 6]]
+  let offDaysLocal = [0, 6]
+  offDays.subscribe(v => offDaysLocal = [...v])
+
+  function toggleOffDay(idx, checked) {
+    if (checked) offDaysLocal = [...offDaysLocal, idx].sort((a, b) => a - b)
+    else offDaysLocal = offDaysLocal.filter(d => d !== idx)
+  }
 
   // Sync slider ↔ number input
   function onReqSlider(e)  { reqHoursLocal = parseFloat(e.target.value) }
@@ -48,13 +57,17 @@
     commuteGapMinutes.set(commuteGapLocal)
     localStorage.setItem('whl_commute_gap', String(commuteGapLocal))
 
+    offDays.set([...offDaysLocal])
+    localStorage.setItem('whl_off_days', JSON.stringify(offDaysLocal))
+
     const sb = getSupabase()
     const { error } = await sb.from('work_settings').upsert([
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
       { key: 'minimumDailyHours', value: String(minHoursLocal) },
       { key: 'maximumDailyHours', value: String(maxHoursLocal) },
       { key: 'commuteGapMinutes', value: String(commuteGapLocal) },
-      { key: 'use24HourFormat', value: String(use24Local) }
+      { key: 'use24HourFormat', value: String(use24Local) },
+      { key: 'offDays', value: JSON.stringify(offDaysLocal) }
     ])
     if (error) showToast('Settings save failed: ' + error.message, 'error')
     else showToast('Settings saved ✓', 'success')
@@ -203,6 +216,25 @@
           12-hour (2:30 PM)
         </label>
       </div>
+    </div>
+
+    <div style="margin-top: 1.5rem">
+      <label>Work Off Days</label>
+      <div style="margin-top: 0.5rem; display: flex; gap: 0.75rem 1.25rem; flex-wrap: wrap; align-items: center;">
+        {#each DAY_OPTIONS as [name, idx]}
+          <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer; align-items: center;">
+            <input
+              type="checkbox"
+              checked={offDaysLocal.includes(idx)}
+              on:change={e => toggleOffDay(idx, e.target.checked)}
+            />
+            {name}
+          </label>
+        {/each}
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        Hours logged on off days count as pure overtime (no required-hours deduction). Off days are shown with a muted background in the calendar and are excluded as recipients during rebalancing — their surplus hours can be redistributed to working days.
+      </p>
     </div>
 
     <button class="btn btn-primary" style="margin-top:1.5rem" on:click={saveSettings}>

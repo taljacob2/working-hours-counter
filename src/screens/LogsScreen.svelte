@@ -3,8 +3,8 @@
   import { user, logs, selectedDate, calCursor, logResolution, editingLogId, selectedDayLogs, showToast } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
-           loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat } from '../stores/appStore.js'
+           loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -22,7 +22,7 @@
   $: calMonth = $calCursor.getMonth() + 1
 
   $: calDays = buildCalendar(calYear, calMonth)
-  $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours)
+  $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays)
   $: daysLogged = loggedDaysInMonth($logs, calYear, calMonth).length
 
   function buildCalendar(year, month) {
@@ -38,12 +38,13 @@
       const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? now : (isOpen ? null : null))
       const reqMs  = $requiredHours * 3_600_000
       const minMs  = $minimumDailyHours * 3_600_000
-      const otMs   = dl.length > 0 ? netMs - reqMs : null
+      const dayIsOff = isOffDay(key, $offDays)
+      const otMs   = dl.length > 0 ? (dayIsOff ? netMs : netMs - reqMs) : null
       const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? now : null)
       const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? now : null)
-      const underMin = netMs > 0 && netMs < minMs
-      const aboveMax = netMs > $maximumDailyHours * 3_600_000
-      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax })
+      const underMin = !dayIsOff && netMs > 0 && netMs < minMs
+      const aboveMax = !dayIsOff && netMs > $maximumDailyHours * 3_600_000
+      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff })
     }
     return cells
   }
@@ -155,42 +156,54 @@
     return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
   }
 
-  function suggestRebalancing(cells, minMs, maxMs, reqMs) {
+  function suggestRebalancing(cells, minMs, maxMs, reqMs, offDays = []) {
+    const dayIsOff = key => isOffDay(key, offDays)
+
     // Mutable working copies — only logged days matter
     const days = cells
       .filter(c => c !== null && c.count > 0)
-      .map(c => ({ key: c.key, currentMs: c.netMs, offMs: c.offMs }))
+      .map(c => ({ key: c.key, currentMs: c.netMs, offMs: c.offMs, isOff: dayIsOff(c.key) }))
 
     const transfers = []
 
-    // Recipients: days below minimum, biggest deficit first
+    // Recipients: only non-off days below minimum (off days have no required hours)
     const recipients = days
-      .filter(d => d.currentMs > 0 && d.currentMs < minMs)
+      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs)
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of recipients) {
       while (rec.currentMs < minMs) {
-        // Donor priority: above-max days (drain to max first), then OT days (drain to required)
+        // Donor priority:
+        //   1. Non-off days above max (drain to max)
+        //   2. Off days with any home hours (all hours are pure OT)
+        //   3. Non-off days with OT (drain to required)
         const aboveMaxDonors = days
-          .filter(d => !d.tappedOut && d.currentMs > maxMs)
+          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > maxMs)
+          .sort((a, b) => b.currentMs - a.currentMs)
+        const offDayDonors = days
+          .filter(d => !d.tappedOut && d.isOff && d.currentMs > d.offMs)
           .sort((a, b) => b.currentMs - a.currentMs)
         const otDonors = days
-          .filter(d => !d.tappedOut && d.currentMs > reqMs && d.currentMs <= maxMs)
+          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > reqMs && d.currentMs <= maxMs)
           .sort((a, b) => b.currentMs - a.currentMs)
 
-        const donor = aboveMaxDonors[0] || otDonors[0]
+        const donor = aboveMaxDonors[0] || offDayDonors[0] || otDonors[0]
         if (!donor) break
 
-        // Floor: drain above-max donors down to max; OT donors down to required
-        // CRITICAL: We cannot touch 'office' hours, so the donor can NEVER drop below their offMs
-        let floor = donor.currentMs > maxMs ? maxMs : reqMs
-        floor = Math.max(floor, donor.offMs)
+        // Off days: all home hours are donatable (floor = office hours only)
+        // Regular days: drain to max or required, but never below office hours
+        let floor
+        if (donor.isOff) {
+          floor = donor.offMs
+        } else {
+          floor = donor.currentMs > maxMs ? maxMs : reqMs
+          floor = Math.max(floor, donor.offMs)
+        }
 
         const available = donor.currentMs - floor
         if (available <= 0) {
-          // This donor is tapped out (all remaining surplus is locked in office hours)
-          donor.tappedOut = true // Prevent infinite loop
-          continue 
+          donor.tappedOut = true
+          continue
         }
 
         const needed = minMs - rec.currentMs
@@ -202,8 +215,9 @@
       }
     }
 
-    const stillUnderMin  = days.filter(d => d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
-    const stillAboveMax  = days.filter(d => d.currentMs > maxMs).map(d => d.key)
+    // Off days are never violations — only check non-off days
+    const stillUnderMin  = days.filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < minMs).map(d => d.key)
+    const stillAboveMax  = days.filter(d => !d.isOff && d.currentMs > maxMs).map(d => d.key)
     const noViolations   = stillUnderMin.length === 0 && stillAboveMax.length === 0
 
     return { transfers, stillUnderMin, stillAboveMax, noViolations }
@@ -214,7 +228,8 @@
         calDays.filter(Boolean),
         $minimumDailyHours * 3_600_000,
         $maximumDailyHours * 3_600_000,
-        $requiredHours    * 3_600_000
+        $requiredHours    * 3_600_000,
+        $offDays
       )
     : null
 
@@ -549,6 +564,7 @@
             class="cal-cell"
             class:cal-cell--today={cell.key === todayKey}
             class:cal-cell--selected={cell.key === $selectedDate}
+            class:cal-cell--off-day={cell.isOff}
             class:cal-cell--ot-pos={cell.otMs !== null && cell.otMs >= 0}
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
             class:cal-cell--under-min={cell.underMin}
@@ -952,6 +968,8 @@
   .cal-cell--under-min { box-shadow: inset 0 0 0 1.5px var(--color-ot-neg); }
   .cal-cell--above-max { box-shadow: inset 0 0 0 1.5px hsl(38 95% 55%); }
   .cal-cell--filtered-out { opacity: 0.15; pointer-events: none; }
+  .cal-cell--off-day { background: color-mix(in srgb, var(--color-text-muted) 6%, var(--color-surface-2)); }
+  .cal-cell--off-day .cal-day-num { color: var(--color-text-muted); }
   .active-filter     { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
   .active-filter-max { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
   .cal-day-num { font-size: 0.9rem; font-weight: 600; }

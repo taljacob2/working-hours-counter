@@ -11,6 +11,8 @@ export const minimumDailyHours = writable(5)
 export const maximumDailyHours = writable(12)
 export const commuteGapMinutes = writable(45)
 export const use24HourFormat = writable(true)
+// Days of week that are off (0=Sun, 1=Mon, ..., 6=Sat). Default: Sat+Sun.
+export const offDays = writable([0, 6])
 
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')

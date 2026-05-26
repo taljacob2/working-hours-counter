@@ -1,9 +1,9 @@
 <script>
   import { onDestroy } from 'svelte'
-  import { logs, requiredHours, showToast } from '../stores/appStore.js'
+  import { logs, requiredHours, offDays, showToast } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { computeNetMs, computeTotalMs, fmtDuration, dateKey, byTs,
-           loggedDaysInMonth, monthBounds, monthCumulativeOtMs } from '../lib/timeUtils.js'
+           loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
 
   // ── Live clock ────────────────────────────────────────────────
   let now = new Date()
@@ -16,7 +16,8 @@
   $: todayNetMs = computeNetMs(todayLogs, now)
   $: todayTotalMs = computeTotalMs(todayLogs)
   $: reqMs = $requiredHours * 3_600_000
-  $: todayOtMs = todayNetMs - reqMs
+  $: todayIsOffDay = isOffDay(todayKey, $offDays)
+  $: todayOtMs = todayIsOffDay ? todayNetMs : todayNetMs - reqMs
 
   $: thisYear  = now.getFullYear()
   $: thisMonth = now.getMonth() + 1
@@ -38,7 +39,7 @@
       return acc + computeTotalMs(dl)
     }, 0)
   })()
-  $: cumOtMs = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours)
+  $: cumOtMs = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours, $offDays)
 
   // ── Platform state ───────────────────────────────────────────
   function platformState(platform, todayLogsArray) {
