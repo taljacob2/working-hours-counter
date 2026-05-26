@@ -639,16 +639,22 @@
               <span class="badge badge-warning">Action Required</span>
             {/if}
           </div>
-          <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; background: var(--bg-color); padding: 0.75rem; border-radius: 6px; width: 100%; border: 1px solid var(--border-color); align-items: center;">
-            <div style="display: flex; flex-direction: column;">
-              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Total Monthly OT Before</span>
-              <strong style="font-size: 1.1rem;" class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</strong>
+          {#if !rebalancing.noViolations}
+            <div class="rebal-violations">
+              {#if rebalancing.stillAboveMax.length}
+                <span class="rebal-violation-item rebal-violation--max">⚠ Still above {$maximumDailyHours}h: {rebalancing.stillAboveMax.map(fmtKeyShort).join(', ')}</span>
+              {/if}
+              {#if rebalancing.stillUnderMin.length}
+                <span class="rebal-violation-item rebal-violation--min">⚠ Still under {$minimumDailyHours}h: {rebalancing.stillUnderMin.map(fmtKeyShort).join(', ')}</span>
+              {/if}
             </div>
-            <div style="color: var(--text-muted); font-size: 1.2rem;">&rarr;</div>
+          {/if}
+          <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; background: var(--color-surface-2); padding: 0.75rem; border-radius: 6px; width: 100%; border: 1px solid var(--color-border); align-items: center;">
             <div style="display: flex; flex-direction: column;">
-              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Total Monthly OT After</span>
-              <strong style="font-size: 1.1rem;" class={monthOtMs < 0 ? 'neg' : 'pos'}>{monthOtMs < 0 ? '-' : '+'}{fmtDuration(Math.abs(monthOtMs))}</strong>
+              <span style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cumulative Monthly OT</span>
+              <strong style="font-size: 1.1rem; color: {cumOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{cumOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(cumOt))}</strong>
             </div>
+            <div style="color: var(--color-text-muted); font-size: 0.8rem; flex: 1; font-style: italic;">Rebalancing redistributes hours between days — total monthly OT stays the same.</div>
           </div>
           <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
         </div>
@@ -783,10 +789,10 @@
           </div>
           <div class="rebal-day-banner-row" style="margin-top: 0.25rem;">
             <span class="rebal-day-banner-label">OT Before:</span>
-            <strong class="rebal-day-banner-val" style="color: {selOt < 0 ? 'var(--danger-color)' : 'var(--success-color)'}">{selOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(selOt))}</strong>
+            <strong class="rebal-day-banner-val" style="color: {selOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{selOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(selOt))}</strong>
             <span class="rebal-day-banner-arrow">→</span>
             <span class="rebal-day-banner-label">OT After:</span>
-            <strong class="rebal-day-banner-val rebal-day-banner-target" style="color: {newOt < 0 ? 'var(--danger-color)' : 'var(--success-color)'}">{newOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(newOt))}</strong>
+            <strong class="rebal-day-banner-val rebal-day-banner-target" style="color: {newOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{newOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(newOt))}</strong>
           </div>
           <p class="rebal-day-banner-hint">
             {isDonor
@@ -987,7 +993,7 @@
   }
 
   /* Calendar */
-  .cal-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; box-shadow: var(--shadow-sm); position: sticky; top: 72px; overflow: hidden; }
+  .cal-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; box-shadow: var(--shadow-sm); position: sticky; top: 72px; overflow-x: hidden; overflow-y: auto; max-height: calc(100dvh - 80px); }
   .cal-nav { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
   .cal-title { flex: 1; text-align: center; font-size: 0.95rem; }
   .cal-month-pills { display: flex; gap: 0.375rem; justify-content: center; margin-top: 0.25rem; flex-wrap: wrap; }
@@ -1051,6 +1057,11 @@
   .rebal-hd-title { font-weight: 700; font-size: 0.82rem; color: var(--color-text); }
   .rebal-hd-sub   { font-size: 0.72rem; color: var(--color-text-muted); margin-top: 1px; }
   .rebal-hd-hint  { font-size: 0.68rem; color: var(--color-primary); margin-top: 3px; opacity: 0.8; }
+  .rebal-violations { display: flex; flex-direction: column; gap: 0.2rem; width: 100%; }
+  .rebal-violation-item { font-size: 0.72rem; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+  .rebal-violation--max { background: color-mix(in srgb, hsl(38 95% 55%) 15%, transparent); color: hsl(38 80% 38%); }
+  [data-theme="dark"] .rebal-violation--max { color: hsl(38 95% 65%); }
+  .rebal-violation--min { background: color-mix(in srgb, var(--color-ot-neg) 12%, transparent); color: var(--color-ot-neg); }
 
   /* Clean / no-violation state */
   .rebal-clean {
@@ -1199,6 +1210,16 @@
   .log-table tr.suggested-row td { background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-2)); }
   .note-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .muted { color: var(--color-text-muted); }
+
+  /* Badges */
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 2px 10px; border-radius: 999px;
+    font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+  }
+  .badge-success { background: color-mix(in srgb, var(--color-ot-pos) 18%, transparent); color: var(--color-ot-pos); }
+  .badge-warning { background: color-mix(in srgb, hsl(38 95% 55%) 18%, transparent); color: hsl(38 85% 38%); }
+  [data-theme="dark"] .badge-warning { color: hsl(38 95% 65%); }
 
   /* Edit panel */
   .edit-panel { margin-top: 0.5rem; }
