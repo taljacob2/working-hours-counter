@@ -588,7 +588,6 @@
     isSaving = true
     const sb = getSupabase()
     const payload = {
-      user_id: $user.id,
       timestamp: newTs,
       platform: 'home',
       action,
@@ -604,7 +603,7 @@
   async function applyBlock(block) {
     isSaving = true
     const sb = getSupabase()
-    const base = { user_id: $user.id, platform: 'home', date_key: $selectedDate }
+    const base = { platform: 'home', date_key: $selectedDate }
     const { data: rd, error: re } = await sb.from('work_logs')
       .insert({ ...base, action: 'resume', timestamp: block.resumeTs }).select().single()
     if (re) { showToast('Error: ' + re.message, 'error'); isSaving = false; return }
@@ -669,7 +668,7 @@
       const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, commuteGapMins, netMs)
       if (!sugg) continue
 
-      const base = { user_id: $user.id, platform: 'home', date_key: dk }
+      const base = { platform: 'home', date_key: dk }
       if (sugg.type === 'delete_session') {
         deletes.push(sugg.resumeLogId, sugg.pauseLogId)
       } else if (sugg.type === 'create_blocks') {
