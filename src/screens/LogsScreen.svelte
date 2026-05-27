@@ -299,6 +299,46 @@
     return { donors, recipients }
   })()
 
+  // Returns the net ms change in worked hours that a suggestion would produce
+  function simulateSuggestionDeltaMs(dayLogs, sugg) {
+    if (!sugg) return 0
+    if (sugg.type === 'create_blocks')     return sugg.totalDeltaMs
+    if (sugg.type === 'delete_session')    return -sugg.sessionDurationMs
+    if (sugg.type === 'create_block_logs') return new Date(sugg.pauseTs).getTime() - new Date(sugg.resumeTs).getTime()
+    if (sugg.type === 'create_log')        return sugg.deltaMs
+    if (sugg.logId) {
+      const modified = dayLogs.map(l => l.id === sugg.logId ? { ...l, timestamp: sugg.newTs } : l)
+      return computeNetMs(modified.sort(byTs)) - computeNetMs(dayLogs)
+    }
+    return 0
+  }
+
+  // Projected OT after all suggestions are applied, with per-day breakdown
+  $: otProjection = (() => {
+    if (!rebalancing || !showRebalancing) return null
+    const maxMs = $maximumDailyHours * 3_600_000
+    const affectedKeys = new Set([...Object.keys(rebalMap), ...(rebalancing.stillAboveMax || [])])
+    const breakdown = []
+    let totalDelta = 0
+    for (const dk of [...affectedKeys]) {
+      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      if (!dayLogs.length) continue
+      const netMs = computeNetMs(dayLogs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
+      if (!sugg) continue
+      const delta = simulateSuggestionDeltaMs(dayLogs, sugg)
+      if (delta === 0) continue
+      const dayCell = calDays.find(c => c?.key === dk)
+      const currentOt = dayCell?.otMs ?? 0
+      const isDonor = rebalancing.stillAboveMax.includes(dk)
+      breakdown.push({ dk, isDonor, currentOt, projectedOt: currentOt + delta, delta })
+      totalDelta += delta
+    }
+    if (!breakdown.length) return null
+    breakdown.sort((a, b) => (a.isDonor === b.isDonor ? 0 : a.isDonor ? -1 : 1))
+    return { projectedOt: cumOt + totalDelta, delta: totalDelta, breakdown }
+  })()
+
   function computeHumanHoursBlocks(sortedLogs, neededMs, dateStr, commuteGapMins) {
     const commuteMs = commuteGapMins * 60_000
     const dayStart  = new Date(dateStr + 'T06:00:00').getTime()
@@ -898,12 +938,41 @@
               {/if}
             </div>
           {/if}
-          <div style="display: flex; gap: 1.5rem; margin-top: 0.5rem; background: var(--color-surface-2); padding: 0.75rem; border-radius: 6px; width: 100%; border: 1px solid var(--color-border); align-items: center;">
-            <div style="display: flex; flex-direction: column;">
-              <span style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cumulative Monthly OT</span>
-              <strong style="font-size: 1.1rem; color: {cumOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{cumOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(cumOt))}</strong>
+          <div class="ot-projection-box">
+            <div class="ot-proj-row">
+              <div class="ot-proj-col">
+                <span class="ot-proj-label">Current OT</span>
+                <strong class="ot-proj-val" style="color:{cumOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(cumOt,true)}</strong>
+              </div>
+              {#if otProjection}
+                <span class="ot-proj-arrow">→</span>
+                <div class="ot-proj-col">
+                  <span class="ot-proj-label">After rebalance</span>
+                  <strong class="ot-proj-val" style="color:{otProjection.projectedOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(otProjection.projectedOt,true)}</strong>
+                </div>
+                <span class="ot-proj-delta" style="color:{otProjection.delta<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(otProjection.delta,true)}</span>
+              {/if}
             </div>
-            <div style="color: var(--color-text-muted); font-size: 0.8rem; flex: 1; font-style: italic;">Hours added to deficit days first count toward the daily requirement before becoming OT — cumulative OT may decrease after rebalancing.</div>
+            {#if otProjection?.breakdown.length}
+              <details class="ot-proj-breakdown">
+                <summary>Why does OT change?</summary>
+                <table class="ot-proj-table">
+                  <thead><tr><th>Day</th><th>Role</th><th>OT now</th><th>OT after</th><th>&Delta;</th></tr></thead>
+                  <tbody>
+                    {#each otProjection.breakdown as row}
+                      <tr>
+                        <td>{fmtKeyShort(row.dk)}</td>
+                        <td><span class="pill {row.isDonor?'pill-ot-neg':'pill-ot-pos'}" style="font-size:0.68rem;">{row.isDonor?'↓ donor':'↑ recipient'}</span></td>
+                        <td style="color:{row.currentOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.currentOt,true)}</td>
+                        <td style="color:{row.projectedOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.projectedOt,true)}</td>
+                        <td style="color:{row.delta<0?'var(--color-ot-neg)':'var(--color-ot-pos)'}; font-weight:700;">{fmtDuration(row.delta,true)}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+                <p class="ot-proj-note">Donor days lose OT when sessions are trimmed. Hours added to recipient days first fill the {$requiredHours}h daily requirement — only the excess counts as OT.</p>
+              </details>
+            {/if}
           </div>
           <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
         </div>
@@ -1397,6 +1466,45 @@
   .rebal-hd-title { font-weight: 700; font-size: 0.82rem; color: var(--color-text); }
   .rebal-hd-sub   { font-size: 0.72rem; color: var(--color-text-muted); margin-top: 1px; }
   .rebal-hd-hint  { font-size: 0.68rem; color: var(--color-primary); margin-top: 3px; opacity: 0.8; }
+  /* OT projection box */
+  .ot-projection-box {
+    margin-top: 0.5rem; width: 100%;
+    background: var(--color-surface-2); border: 1px solid var(--color-border);
+    border-radius: 6px; padding: 0.65rem 0.875rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .ot-proj-row { display: flex; align-items: center; gap: 0.875rem; flex-wrap: wrap; }
+  .ot-proj-col { display: flex; flex-direction: column; }
+  .ot-proj-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); }
+  .ot-proj-val { font-size: 1.05rem; }
+  .ot-proj-arrow { color: var(--color-text-muted); font-size: 1rem; }
+  .ot-proj-delta {
+    font-size: 0.88rem; font-weight: 700;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: 4px; padding: 0.1rem 0.4rem;
+  }
+  .ot-proj-breakdown summary {
+    font-size: 0.78rem; color: var(--color-text-muted);
+    cursor: pointer; user-select: none; list-style: none;
+  }
+  .ot-proj-breakdown summary::marker, .ot-proj-breakdown summary::-webkit-details-marker { display: none; }
+  .ot-proj-table {
+    width: 100%; font-size: 0.78rem;
+    border-collapse: collapse; margin-top: 0.35rem;
+  }
+  .ot-proj-table th, .ot-proj-table td {
+    padding: 0.2rem 0.35rem; text-align: left;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .ot-proj-table th {
+    color: var(--color-text-muted); font-weight: 600;
+    text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.03em;
+  }
+  .ot-proj-note {
+    font-size: 0.72rem; color: var(--color-text-muted);
+    font-style: italic; margin: 0.35rem 0 0;
+  }
+
   .rebal-violations { display: flex; flex-direction: column; gap: 0.2rem; width: 100%; }
   .rebal-violation-item { font-size: 0.72rem; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
   .rebal-violation--max { background: color-mix(in srgb, hsl(38 95% 55%) 15%, transparent); color: hsl(38 80% 38%); }
