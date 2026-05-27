@@ -644,6 +644,7 @@
     if (!rebalancing || !showRebalancing) return
     const maxMs = $maximumDailyHours * 3_600_000
     const commuteGapMins = $commuteGapMinutes
+    const otBefore = cumOt
 
     // Snapshot affected logs before touching anything
     const affectedKeys = new Set([...Object.keys(rebalMap), ...(rebalancing.stillAboveMax || [])])
@@ -711,19 +712,23 @@
       if (error) { showToast('Apply failed: ' + error.message, 'error'); isSaving = false; return }
     }
 
-    logs.update(ls => {
-      let result = ls.filter(l => !deletes.includes(l.id))
-      for (const { logId, newTs } of updates)
-        result = result.map(l => l.id === logId ? { ...l, timestamp: newTs, date_key: newTs.slice(0, 10) } : l)
-      return [...result, ...insertedRows]
-    })
+    let newLogs = $logs.filter(l => !deletes.includes(l.id))
+    for (const { logId, newTs } of updates)
+      newLogs = newLogs.map(l => l.id === logId ? { ...l, timestamp: newTs, date_key: newTs.slice(0, 10) } : l)
+    newLogs = [...newLogs, ...insertedRows]
+    logs.set(newLogs)
 
     isSaving = false
+    const otAfter = monthCumulativeOtMs(newLogs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
+    const otDelta = otAfter - otBefore
     const parts = []
     if (updates.length)  parts.push(`${updates.length} edited`)
     if (inserts.length)  parts.push(`${inserts.length} added`)
     if (deletes.length)  parts.push(`${deletes.length} deleted`)
-    showToast(`Rebalancing applied (${parts.join(', ')})`, 'success')
+    const otChange = otDelta === 0
+      ? ''
+      : ` · OT ${fmtDuration(otBefore, true)} → ${fmtDuration(otAfter, true)}`
+    showToast(`Rebalancing applied (${parts.join(', ')})${otChange}`, 'success')
   }
 
   async function revertAllRebalance() {
@@ -898,7 +903,7 @@
               <span style="font-size: 0.75rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Cumulative Monthly OT</span>
               <strong style="font-size: 1.1rem; color: {cumOt < 0 ? 'var(--color-ot-neg)' : 'var(--color-ot-pos)'}">{cumOt < 0 ? '-' : '+'}{fmtDuration(Math.abs(cumOt))}</strong>
             </div>
-            <div style="color: var(--color-text-muted); font-size: 0.8rem; flex: 1; font-style: italic;">Rebalancing redistributes hours between days — total monthly OT stays the same.</div>
+            <div style="color: var(--color-text-muted); font-size: 0.8rem; flex: 1; font-style: italic;">Hours added to deficit days first count toward the daily requirement before becoming OT — cumulative OT may decrease after rebalancing.</div>
           </div>
           <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
         </div>
