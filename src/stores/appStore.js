@@ -17,8 +17,14 @@ export const offDays = writable([0, 6])
 export const dayOverrides = writable({})
 
 // ── Office geofence ───────────────────────────────────────────
-// null = not configured; { lat, lng, radiusMeters }
-export const officeLocation = writable(null)
+// List of saved locations: [{ id, name, lat, lng, radiusMeters }]
+export const officeLocations = writable([])
+// ID of the currently active location (null = none)
+export const activeOfficeId = writable(null)
+// Derived single location — keeps existing geofence code in App.svelte unchanged
+export const officeLocation = derived([officeLocations, activeOfficeId], ([$locs, $id]) =>
+  $locs.find(l => l.id === $id) ?? null
+)
 // Whether auto resume/pause via geofence is active
 export const autoTrackEnabled = writable(false)
 

@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocation, autoTrackEnabled, showToast } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -124,10 +124,28 @@
       const dayOverridesRaw = dayOverridesVal ?? dayOverridesLocal ?? '{}'
       try { dayOverrides.set(JSON.parse(dayOverridesRaw)) } catch { dayOverrides.set({}) }
 
-      const officeLoc = settings?.find(s => s.key === 'officeLocation')?.value
-      const officeLocLocal = localStorage.getItem('whl_office_location')
-      const officeLocRaw = officeLoc ?? officeLocLocal ?? 'null'
-      try { officeLocation.set(JSON.parse(officeLocRaw)) } catch { officeLocation.set(null) }
+      const officeLocsVal = settings?.find(s => s.key === 'officeLocations')?.value
+      const officeLocsLocal = localStorage.getItem('whl_office_locations')
+      if (officeLocsVal || officeLocsLocal) {
+        try { officeLocations.set(JSON.parse(officeLocsVal ?? officeLocsLocal)) } catch { officeLocations.set([]) }
+        const activeIdVal = settings?.find(s => s.key === 'activeOfficeId')?.value
+        const activeIdLocal = localStorage.getItem('whl_active_office_id')
+        activeOfficeId.set(activeIdVal || activeIdLocal || null)
+      } else {
+        // Migrate from old single-location format
+        const oldLocVal = settings?.find(s => s.key === 'officeLocation')?.value
+        const oldLocLocal = localStorage.getItem('whl_office_location')
+        const oldLocRaw = oldLocVal ?? oldLocLocal ?? 'null'
+        try {
+          const oldLoc = JSON.parse(oldLocRaw)
+          if (oldLoc) {
+            const id = crypto.randomUUID()
+            const migrated = [{ id, name: 'Office', ...oldLoc }]
+            officeLocations.set(migrated)
+            activeOfficeId.set(id)
+          }
+        } catch { officeLocations.set([]) }
+      }
 
       const autoTrackVal = settings?.find(s => s.key === 'autoTrackEnabled')?.value
       const autoTrackLocal = localStorage.getItem('whl_auto_track')

@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocation, autoTrackEnabled } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -217,40 +217,102 @@
   }
 
   // ── Office Location / Auto-Track ─────────────────────────────
-  let officeLocLocal = null
-  officeLocation.subscribe(v => officeLocLocal = v)
+  let officeLocsLocal = []
+  officeLocations.subscribe(v => officeLocsLocal = v)
+
+  let activeOfficeIdLocal = null
+  activeOfficeId.subscribe(v => activeOfficeIdLocal = v)
 
   let autoTrackLocal = false
   autoTrackEnabled.subscribe(v => autoTrackLocal = v)
 
-  let officeRadiusLocal = 200  // metres
-  $: if (officeLocLocal) officeRadiusLocal = officeLocLocal.radiusMeters
+  let officeRadiusLocal = 200
+  $: activeLocLocal = officeLocsLocal.find(l => l.id === activeOfficeIdLocal) ?? null
+  $: if (activeLocLocal) officeRadiusLocal = activeLocLocal.radiusMeters
 
-  let capturingLocation = false
+  let newLocName = ''
+  let addingLocation = false
 
-  async function captureOfficeLocation() {
+  async function captureAndAdd() {
     if (!navigator?.geolocation) { showToast('Geolocation not available', 'error'); return }
-    capturingLocation = true
+    addingLocation = true
     navigator.geolocation.getCurrentPosition(
       async pos => {
-        capturingLocation = false
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: officeRadiusLocal }
-        officeLocLocal = loc
-        await saveOfficeLocation(loc)
+        addingLocation = false
+        const id = crypto.randomUUID()
+        const name = newLocName.trim() || 'Office'
+        const loc = { id, name, lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: 200 }
+        newLocName = ''
+        await saveLocations([...officeLocsLocal, loc], id, true)
+        showToast(`Added "${loc.name}"`, 'success')
       },
-      err => {
-        capturingLocation = false
-        showToast('Could not get location: ' + err.message, 'error')
-      },
+      err => { addingLocation = false; showToast('Could not get location: ' + err.message, 'error') },
       { enableHighAccuracy: true, timeout: 10_000 }
     )
   }
 
-  async function saveOfficeLocation(loc) {
-    officeLocation.set(loc)
-    localStorage.setItem('whl_office_location', JSON.stringify(loc))
-    const upsertRows = [{ key: 'officeLocation', value: JSON.stringify(loc) }]
-    if (!autoTrackLocal) {
+  async function setActive(id) {
+    const name = officeLocsLocal.find(l => l.id === id)?.name ?? 'location'
+    await saveLocations(officeLocsLocal, id, true)
+    showToast(`Switched to "${name}"`, 'success')
+  }
+
+  async function updateActiveRadius() {
+    if (!activeLocLocal) return
+    const updated = officeLocsLocal.map(l => l.id === activeOfficeIdLocal ? { ...l, radiusMeters: officeRadiusLocal } : l)
+    await saveLocations(updated, activeOfficeIdLocal, false)
+  }
+
+  async function updateActiveGPS() {
+    if (!navigator?.geolocation || !activeLocLocal) return
+    addingLocation = true
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        addingLocation = false
+        const updated = officeLocsLocal.map(l => l.id === activeOfficeIdLocal
+          ? { ...l, lat: pos.coords.latitude, lng: pos.coords.longitude }
+          : l)
+        await saveLocations(updated, activeOfficeIdLocal, false)
+        showToast('GPS position updated ✓', 'success')
+      },
+      err => { addingLocation = false; showToast('Could not get location: ' + err.message, 'error') },
+      { enableHighAccuracy: true, timeout: 10_000 }
+    )
+  }
+
+  async function renameLocation(id, name) {
+    const trimmed = name.trim() || 'Office'
+    if (officeLocsLocal.find(l => l.id === id)?.name === trimmed) return
+    const updated = officeLocsLocal.map(l => l.id === id ? { ...l, name: trimmed } : l)
+    await saveLocations(updated, activeOfficeIdLocal, false)
+  }
+
+  async function deleteLocation(id) {
+    const updated = officeLocsLocal.filter(l => l.id !== id)
+    const wasActive = activeOfficeIdLocal === id
+    const newActiveId = wasActive ? (updated[0]?.id ?? null) : activeOfficeIdLocal
+    await saveLocations(updated, newActiveId, false)
+    if (wasActive && !newActiveId) {
+      autoTrackLocal = false
+      autoTrackEnabled.set(false)
+      localStorage.setItem('whl_auto_track', 'false')
+      const sb = getSupabase()
+      await sb.from('work_settings').upsert([{ key: 'autoTrackEnabled', value: 'false' }])
+    }
+    showToast('Location removed', 'info')
+  }
+
+  async function saveLocations(locs, activeId, autoEnable) {
+    officeLocations.set(locs)
+    activeOfficeId.set(activeId)
+    activeOfficeIdLocal = activeId
+    localStorage.setItem('whl_office_locations', JSON.stringify(locs))
+    localStorage.setItem('whl_active_office_id', activeId ?? '')
+    const upsertRows = [
+      { key: 'officeLocations', value: JSON.stringify(locs) },
+      { key: 'activeOfficeId', value: activeId ?? '' },
+    ]
+    if (autoEnable && !autoTrackLocal) {
       autoTrackLocal = true
       autoTrackEnabled.set(true)
       localStorage.setItem('whl_auto_track', 'true')
@@ -258,29 +320,7 @@
     }
     const sb = getSupabase()
     const { error } = await sb.from('work_settings').upsert(upsertRows)
-    if (error) showToast('Failed to save office location', 'error')
-    else showToast('Office location saved ✓', 'success')
-  }
-
-  async function updateRadius() {
-    if (!officeLocLocal) return
-    const loc = { ...officeLocLocal, radiusMeters: officeRadiusLocal }
-    await saveOfficeLocation(loc)
-  }
-
-  async function clearOfficeLocation() {
-    officeLocLocal = null
-    officeLocation.set(null)
-    autoTrackLocal = false
-    autoTrackEnabled.set(false)
-    localStorage.removeItem('whl_office_location')
-    localStorage.setItem('whl_auto_track', 'false')
-    const sb = getSupabase()
-    await sb.from('work_settings').upsert([
-      { key: 'officeLocation', value: 'null' },
-      { key: 'autoTrackEnabled', value: 'false' },
-    ])
-    showToast('Office location cleared', 'info')
+    if (error) showToast('Failed to save', 'error')
   }
 
   async function toggleAutoTrack() {
@@ -307,8 +347,8 @@
     if (!navigator?.geolocation) return
     liveWatchId = navigator.geolocation.watchPosition(
       pos => {
-        if (!officeLocLocal) { liveDistance = null; return }
-        liveDistance = Math.round(_geodist(pos.coords.latitude, pos.coords.longitude, officeLocLocal.lat, officeLocLocal.lng))
+        if (!activeLocLocal) { liveDistance = null; return }
+        liveDistance = Math.round(_geodist(pos.coords.latitude, pos.coords.longitude, activeLocLocal.lat, activeLocLocal.lng))
       },
       () => {},
       { enableHighAccuracy: true, maximumAge: 5_000 }
@@ -319,7 +359,7 @@
     if (liveWatchId !== null) navigator.geolocation.clearWatch(liveWatchId)
   })
 
-  $: liveInside = liveDistance !== null && officeLocLocal ? liveDistance <= officeLocLocal.radiusMeters : null
+  $: liveInside = liveDistance !== null && activeLocLocal ? liveDistance <= activeLocLocal.radiusMeters : null
 
   // ── Auth / Reconfig ──────────────────────────────────────────
   async function signOut() {
@@ -520,74 +560,93 @@
     </div>
   </div>
 
-  <!-- Office Location / Auto-Track -->
+  <!-- Office Auto-Track -->
   <div class="card">
     <p class="section-title">Office Auto-Track (GPS)</p>
     <p class="info-text">
-      Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave your office.
+      Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave a saved location.
       {#if !window?.Capacitor?.isNativePlatform?.()}
         <br><em>On web this only works while the page is open. Install the Android app for true background tracking.</em>
       {/if}
     </p>
 
-    {#if officeLocLocal}
-      <div class="office-loc-display">
-        <span class="office-loc-coord">📍 {officeLocLocal.lat.toFixed(5)}, {officeLocLocal.lng.toFixed(5)}</span>
-        <span class="office-loc-radius">Radius: {officeLocLocal.radiusMeters}m</span>
-      </div>
+    {#each officeLocsLocal as loc (loc.id)}
+      {@const isActive = loc.id === activeOfficeIdLocal}
+      <div class="office-loc-card {isActive ? 'office-loc-active' : ''}">
+        <div class="office-loc-header">
+          <input class="loc-name-input" value={loc.name}
+            on:blur={e => renameLocation(loc.id, e.target.value)}
+            on:keydown={e => e.key === 'Enter' && e.target.blur()} />
+          <span class="office-loc-coord">📍 {loc.lat.toFixed(5)}, {loc.lng.toFixed(5)}</span>
+          <div class="office-loc-actions">
+            {#if !isActive}
+              <button class="btn btn-sm btn-secondary" on:click={() => setActive(loc.id)}>Make active</button>
+            {:else}
+              <span class="pill pill-primary">Active</span>
+            {/if}
+            <button class="btn btn-sm btn-danger" on:click={() => deleteLocation(loc.id)}>✕</button>
+          </div>
+        </div>
 
-      <div class="live-meter">
-        {#if liveDistance !== null}
-          {@const pct = Math.min(liveDistance / officeLocLocal.radiusMeters * 100, 100)}
-          <div class="live-meter-bar-track">
-            <div class="live-meter-bar-fill {liveInside ? 'live-fill-in' : 'live-fill-out'}"
-              style="width: {pct}%"></div>
+        {#if isActive}
+          <div style="margin-top: 0.75rem;">
+            <label style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
+            <div class="hours-row" style="margin-top: 0.25rem;">
+              <input type="range" min="50" max="2000" step="50"
+                bind:value={officeRadiusLocal} on:change={updateActiveRadius} style="flex:1" />
+              <input type="number" min="50" max="2000" step="50"
+                bind:value={officeRadiusLocal} on:change={updateActiveRadius} style="width:80px" />
+              <span class="hours-label">m</span>
+            </div>
           </div>
-          <div class="live-meter-label">
-            <span>📡 {liveDistance.toLocaleString()} m from center</span>
-            <span class="{liveInside ? 'live-text-in' : 'live-text-out'}">
-              {liveInside ? `✓ inside (${officeLocLocal.radiusMeters} m radius)` : `✗ ${(liveDistance - officeLocLocal.radiusMeters).toLocaleString()} m past edge`}
-            </span>
+
+          <div class="live-meter">
+            {#if liveDistance !== null}
+              {@const pct = Math.min(liveDistance / loc.radiusMeters * 100, 100)}
+              <div class="live-meter-bar-track">
+                <div class="live-meter-bar-fill {liveInside ? 'live-fill-in' : 'live-fill-out'}"
+                  style="width: {pct}%"></div>
+              </div>
+              <div class="live-meter-label">
+                <span>📡 {liveDistance.toLocaleString()} m from center</span>
+                <span class="{liveInside ? 'live-text-in' : 'live-text-out'}">
+                  {liveInside ? `✓ inside (${loc.radiusMeters} m radius)` : `✗ ${(liveDistance - loc.radiusMeters).toLocaleString()} m past edge`}
+                </span>
+              </div>
+            {:else}
+              <div class="live-meter-bar-track">
+                <div class="live-meter-bar-fill live-fill-pending" style="width: 0%"></div>
+              </div>
+              <div class="live-meter-label">
+                <span class="live-text-pending">📡 Waiting for GPS fix…</span>
+              </div>
+            {/if}
           </div>
-        {:else}
-          <div class="live-meter-bar-track">
-            <div class="live-meter-bar-fill live-fill-pending" style="width: 0%"></div>
-          </div>
-          <div class="live-meter-label">
-            <span class="live-text-pending">📡 Waiting for GPS fix…</span>
+
+          <div class="export-row" style="margin-top: 0.75rem;">
+            <button class="btn btn-sm btn-secondary" on:click={updateActiveGPS} disabled={addingLocation}>
+              {addingLocation ? '⏳…' : '📍 Update GPS'}
+            </button>
+            <button class="btn btn-sm {autoTrackLocal ? 'btn-primary' : 'btn-secondary'}" on:click={toggleAutoTrack}>
+              {autoTrackLocal ? '✅ Auto-track ON' : '⏸ Auto-track OFF'}
+            </button>
           </div>
         {/if}
       </div>
+    {/each}
 
-      <div style="margin-top: 0.75rem;">
-        <label for="radius-slider" style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
-        <div class="hours-row" style="margin-top: 0.25rem;">
-          <input id="radius-slider" type="range" min="50" max="1000" step="50"
-            bind:value={officeRadiusLocal} on:change={updateRadius} style="flex:1" />
-          <input type="number" min="50" max="1000" step="50"
-            bind:value={officeRadiusLocal} on:change={updateRadius} style="width:80px" />
-          <span class="hours-label">m</span>
-        </div>
-      </div>
-
-      <div class="export-row" style="margin-top: 1rem;">
-        <button class="btn btn-secondary" on:click={captureOfficeLocation} disabled={capturingLocation}>
-          {capturingLocation ? '⏳ Getting location…' : '📍 Update location'}
-        </button>
-        <button class="btn {autoTrackLocal ? 'btn-primary' : 'btn-secondary'}" on:click={toggleAutoTrack}>
-          {autoTrackLocal ? '✅ Auto-track ON' : '⏸ Auto-track OFF'}
-        </button>
-        <button class="btn btn-danger" on:click={clearOfficeLocation}>✕ Clear</button>
-      </div>
-    {:else}
-      <div style="margin-top: 0.75rem;">
-        <button class="btn btn-primary" on:click={captureOfficeLocation} disabled={capturingLocation}>
-          {capturingLocation ? '⏳ Getting location…' : '📍 Set office location'}
-        </button>
-        <p class="info-text" style="margin-top: 0.5rem; font-size: 0.78rem;">
-          Go to your office, then tap this button. Your current GPS position will be saved as the office location.
-        </p>
-      </div>
+    <div class="office-add-row">
+      <input type="text" placeholder="Name (e.g. Office, Branch…)" bind:value={newLocName}
+        style="flex:1; min-width:120px" />
+      <button class="btn btn-primary" on:click={captureAndAdd} disabled={addingLocation}
+        style="white-space:nowrap">
+        {addingLocation ? '⏳ Getting location…' : '📍 Add current location'}
+      </button>
+    </div>
+    {#if officeLocsLocal.length === 0}
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.78rem;">
+        Go to your office, enter a name (optional), then tap Add. Your GPS position will be saved.
+      </p>
     {/if}
   </div>
 
@@ -616,9 +675,14 @@
   .info-text { font-size: 0.875rem; color: var(--color-text-muted); line-height: 1.6; }
   .info-text code { font-size: 0.8rem; background: var(--color-surface-2); padding: 2px 6px; border-radius: 4px; }
   .account-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
-  .office-loc-display { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
-  .office-loc-coord { font-size: 0.85rem; font-family: monospace; color: var(--color-text); }
-  .office-loc-radius { font-size: 0.8rem; color: var(--color-text-muted); }
+  .office-loc-card { margin-top: 0.75rem; padding: 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1.5px solid var(--color-border); }
+  .office-loc-active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
+  .office-loc-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .loc-name-input { font-weight: 600; font-size: 0.9rem; border: none; border-bottom: 1px dashed var(--color-border); border-radius: 0; background: transparent; padding: 0 0 1px; width: auto; min-width: 60px; max-width: 160px; color: var(--color-text); }
+  .loc-name-input:focus { outline: none; border-bottom-color: var(--color-primary); box-shadow: none; }
+  .office-loc-coord { font-size: 0.75rem; font-family: monospace; color: var(--color-text-muted); }
+  .office-loc-actions { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+  .office-add-row { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
   .live-meter { margin-top: 0.75rem; }
   .live-meter-bar-track { height: 10px; background: var(--color-surface-2); border-radius: 999px; border: 1px solid var(--color-border); overflow: hidden; }
   .live-meter-bar-fill { height: 100%; border-radius: 999px; transition: width 0.6s ease, background 0.3s ease; }
