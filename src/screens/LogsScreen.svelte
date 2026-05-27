@@ -588,6 +588,7 @@
     isSaving = true
     const sb = getSupabase()
     const payload = {
+      id: crypto.randomUUID(),
       timestamp: newTs,
       platform: 'home',
       action,
@@ -605,10 +606,10 @@
     const sb = getSupabase()
     const base = { platform: 'home', date_key: $selectedDate }
     const { data: rd, error: re } = await sb.from('work_logs')
-      .insert({ ...base, action: 'resume', timestamp: block.resumeTs }).select().single()
+      .insert({ ...base, id: crypto.randomUUID(), action: 'resume', timestamp: block.resumeTs }).select().single()
     if (re) { showToast('Error: ' + re.message, 'error'); isSaving = false; return }
     const { data: pd, error: pe } = await sb.from('work_logs')
-      .insert({ ...base, action: 'pause', timestamp: block.pauseTs }).select().single()
+      .insert({ ...base, id: crypto.randomUUID(), action: 'pause', timestamp: block.pauseTs }).select().single()
     if (pe) { showToast('Error: ' + pe.message, 'error'); isSaving = false; return }
     logs.update(ls => [...ls, rd, pd])
     showToast('Rebalance block applied', 'success')
@@ -674,17 +675,17 @@
       } else if (sugg.type === 'create_blocks') {
         for (const block of sugg.blocks) {
           if (block.kind === 'new_block') {
-            inserts.push({ ...base, action: 'resume', timestamp: block.resumeTs })
-            inserts.push({ ...base, action: 'pause',  timestamp: block.pauseTs  })
+            inserts.push({ ...base, id: crypto.randomUUID(), action: 'resume', timestamp: block.resumeTs })
+            inserts.push({ ...base, id: crypto.randomUUID(), action: 'pause',  timestamp: block.pauseTs  })
           } else if (block.kind === 'extend_resume') {
             updates.push({ logId: block.logId, newTs: block.newTs })
           }
         }
       } else if (sugg.type === 'create_block_logs') {
-        inserts.push({ ...base, action: 'resume', timestamp: sugg.resumeTs })
-        inserts.push({ ...base, action: 'pause',  timestamp: sugg.pauseTs  })
+        inserts.push({ ...base, id: crypto.randomUUID(), action: 'resume', timestamp: sugg.resumeTs })
+        inserts.push({ ...base, id: crypto.randomUUID(), action: 'pause',  timestamp: sugg.pauseTs  })
       } else if (sugg.type === 'create_log') {
-        inserts.push({ ...base, action: sugg.action, timestamp: sugg.newTs })
+        inserts.push({ ...base, id: crypto.randomUUID(), action: sugg.action, timestamp: sugg.newTs })
       } else if (sugg.logId) {
         updates.push({ logId: sugg.logId, newTs: sugg.newTs })
       }
