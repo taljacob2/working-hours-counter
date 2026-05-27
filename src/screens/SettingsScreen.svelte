@@ -536,18 +536,28 @@
         <span class="office-loc-radius">Radius: {officeLocLocal.radiusMeters}m</span>
       </div>
 
-      {#if liveDistance !== null}
-        <div class="live-dist-badge {liveInside ? 'live-dist-in' : 'live-dist-out'}">
-          📡 <strong>{liveDistance.toLocaleString()} m</strong> from center
-          {#if liveInside}
-            — inside radius ✓
-          {:else}
-            — {(liveDistance - officeLocLocal.radiusMeters).toLocaleString()} m past the edge
-          {/if}
-        </div>
-      {:else}
-        <div class="live-dist-badge live-dist-pending">📡 Waiting for GPS fix…</div>
-      {/if}
+      <div class="live-meter">
+        {#if liveDistance !== null}
+          {@const pct = Math.min(liveDistance / officeLocLocal.radiusMeters * 100, 100)}
+          <div class="live-meter-bar-track">
+            <div class="live-meter-bar-fill {liveInside ? 'live-fill-in' : 'live-fill-out'}"
+              style="width: {pct}%"></div>
+          </div>
+          <div class="live-meter-label">
+            <span>📡 {liveDistance.toLocaleString()} m from center</span>
+            <span class="{liveInside ? 'live-text-in' : 'live-text-out'}">
+              {liveInside ? `✓ inside (${officeLocLocal.radiusMeters} m radius)` : `✗ ${(liveDistance - officeLocLocal.radiusMeters).toLocaleString()} m past edge`}
+            </span>
+          </div>
+        {:else}
+          <div class="live-meter-bar-track">
+            <div class="live-meter-bar-fill live-fill-pending" style="width: 0%"></div>
+          </div>
+          <div class="live-meter-label">
+            <span class="live-text-pending">📡 Waiting for GPS fix…</span>
+          </div>
+        {/if}
+      </div>
 
       <div style="margin-top: 0.75rem;">
         <label for="radius-slider" style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
@@ -609,8 +619,14 @@
   .office-loc-display { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
   .office-loc-coord { font-size: 0.85rem; font-family: monospace; color: var(--color-text); }
   .office-loc-radius { font-size: 0.8rem; color: var(--color-text-muted); }
-  .live-dist-badge { margin-top: 0.5rem; padding: 0.4rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.825rem; border: 1px solid; }
-  .live-dist-in { background: var(--color-live-subtle); color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 30%, transparent); }
-  .live-dist-out { background: var(--color-ot-neg-subtle); color: var(--color-ot-neg); border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent); }
-  .live-dist-pending { background: var(--color-surface-2); color: var(--color-text-muted); border-color: var(--color-border); }
+  .live-meter { margin-top: 0.75rem; }
+  .live-meter-bar-track { height: 10px; background: var(--color-surface-2); border-radius: 999px; border: 1px solid var(--color-border); overflow: hidden; }
+  .live-meter-bar-fill { height: 100%; border-radius: 999px; transition: width 0.6s ease, background 0.3s ease; }
+  .live-fill-in  { background: var(--color-live); }
+  .live-fill-out { background: var(--color-ot-neg); }
+  .live-fill-pending { background: var(--color-border); }
+  .live-meter-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--color-text-muted); margin-top: 0.35rem; flex-wrap: wrap; gap: 0.25rem; }
+  .live-text-in  { color: var(--color-live); font-weight: 500; }
+  .live-text-out { color: var(--color-ot-neg); font-weight: 500; }
+  .live-text-pending { color: var(--color-text-muted); }
 </style>
