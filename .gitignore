@@ -17,6 +17,10 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Android signing keystore — never commit, store base64 in GitHub Secrets
+release.keystore
+*.keystore
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

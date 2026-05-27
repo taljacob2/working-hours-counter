@@ -16,6 +16,12 @@ export const offDays = writable([0, 6])
 // Per-date overrides: { 'YYYY-MM-DD': 'work' | 'off' }. Takes precedence over offDays.
 export const dayOverrides = writable({})
 
+// ── Office geofence ───────────────────────────────────────────
+// null = not configured; { lat, lng, radiusMeters }
+export const officeLocation = writable(null)
+// Whether auto resume/pause via geofence is active
+export const autoTrackEnabled = writable(false)
+
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')
 export const toasts = writable([])
