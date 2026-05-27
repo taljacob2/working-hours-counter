@@ -158,7 +158,31 @@
     return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
   }
 
-  function suggestRebalancing(cells, minMs, maxMs, reqMs, offDays = [], dayOverrides = {}) {
+  // How many ms of new home sessions can actually fit in a day's evening + morning slots.
+  // Mirrors computeHumanHoursBlocks slot logic without the neededMs cap.
+  function computeExcessOtSlotCapacity(sortedLogs, dateStr, commuteGapMins) {
+    const commuteMs = commuteGapMins * 60_000
+    const dayStart  = new Date(dateStr + 'T06:00:00').getTime()
+    const dayEnd    = new Date(dateStr + 'T22:00:00').getTime()
+    let eveningStart = new Date(dateStr + 'T17:00:00').getTime()
+    if (sortedLogs.length > 0) {
+      const last = sortedLogs[sortedLogs.length - 1]
+      eveningStart = last.platform === 'office'
+        ? new Date(last.timestamp).getTime() + commuteMs
+        : new Date(last.timestamp).getTime() + 60_000
+    }
+    let morningEnd = new Date(dateStr + 'T09:00:00').getTime()
+    if (sortedLogs.length > 0) {
+      const first = sortedLogs[0]
+      const firstTs = new Date(first.timestamp).getTime()
+      morningEnd = (first.platform === 'home' && first.action === 'resume')
+        ? firstTs
+        : (first.platform === 'office' ? firstTs - commuteMs : firstTs - 60_000)
+    }
+    return Math.max(0, dayEnd - eveningStart) + Math.max(0, morningEnd - dayStart)
+  }
+
+  function suggestRebalancing(cells, minMs, maxMs, reqMs, offDays = [], dayOverrides = {}, logs = [], commuteGapMins = 45) {
     const dayIsOff = key => isOffDay(key, offDays, dayOverrides)
 
     // Mutable working copies — only logged days matter
@@ -224,15 +248,20 @@
     }
 
     // Pass 3: remaining above-max excess → working days below max (distributed as extra OT).
-    // Runs after Pass 2 when above-max donors still have surplus that couldn't go to
-    // under-required recipients (because they were all already at required hours).
+    // Cap each recipient by its real scheduling capacity (evening + morning slots) so we
+    // never over-trim donors relative to what can actually be absorbed.
     for (const d of days) d.tappedOut3 = false
     const pass3Recipients = days
       .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs)
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of pass3Recipients) {
-      while (rec.currentMs < maxMs) {
+      const recLogs   = logs.filter(l => l.date_key === rec.key).sort(byTs)
+      const slotCap   = computeExcessOtSlotCapacity(recLogs, rec.key, commuteGapMins)
+      const maxForRec = Math.min(slotCap, maxMs - rec.currentMs)
+      if (maxForRec <= 0) continue
+      let given = 0
+      while (given < maxForRec) {
         const donor = days
           .filter(d => !d.isOff && !d.tappedOut3 && d.currentMs > maxMs)
           .sort((a, b) => b.currentMs - a.currentMs)[0]
@@ -240,10 +269,11 @@
         const floor    = Math.max(maxMs, donor.offMs)
         const available = donor.currentMs - floor
         if (available <= 0) { donor.tappedOut3 = true; continue }
-        const needed   = maxMs - rec.currentMs
+        const needed   = maxForRec - given
         const transfer = Math.min(available, needed)
         donor.currentMs -= transfer
         rec.currentMs   += transfer
+        given           += transfer
         transfers.push({ from: donor.key, to: rec.key, ms: transfer, isExcessOt: true })
       }
     }
@@ -266,7 +296,9 @@
         $maximumDailyHours * 3_600_000,
         $requiredHours    * 3_600_000,
         $offDays,
-        $dayOverrides
+        $dayOverrides,
+        $logs,
+        $commuteGapMinutes
       )
     : null
 
