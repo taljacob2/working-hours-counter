@@ -341,7 +341,10 @@
       const rank = r => r.isDonor ? 0 : r.isExcessOt ? 1 : 2
       return rank(a) - rank(b)
     })
-    return { projectedOt: cumOt + totalDelta, delta: totalDelta, breakdown }
+    const donorLoss    = breakdown.filter(r => r.isDonor).reduce((s, r) => s + Math.abs(r.delta), 0)
+    const recipientGain = breakdown.filter(r => !r.isDonor).reduce((s, r) => s + Math.max(0, r.delta), 0)
+    const unplacedMs   = Math.max(0, donorLoss - recipientGain)
+    return { projectedOt: cumOt + totalDelta, delta: totalDelta, breakdown, unplacedMs }
   })()
 
   function computeHumanHoursBlocks(sortedLogs, neededMs, dateStr, commuteGapMins) {
@@ -988,6 +991,11 @@
                   <strong>↑ deficit fill</strong> — hours added, but first cover the {$requiredHours}h requirement; only the excess becomes OT. &nbsp;
                   <strong>↑ OT transfer</strong> — surplus added as new home sessions on top of existing work; counts as full OT.
                 </p>
+                {#if otProjection.unplacedMs > 0}
+                  <p class="ot-proj-unplaced">
+                    ⚠ {fmtDuration(otProjection.unplacedMs)} of excess could not be redistributed — all eligible working days in this month are already at the {$maximumDailyHours}h maximum (or have no remaining capacity). This is the sole reason OT decreases.
+                  </p>
+                {/if}
               </details>
             {/if}
           </div>
@@ -1521,6 +1529,13 @@
     font-size: 0.72rem; color: var(--color-text-muted);
     font-style: italic; margin: 0.35rem 0 0;
   }
+  .ot-proj-unplaced {
+    font-size: 0.75rem; margin: 0.4rem 0 0;
+    padding: 0.3rem 0.5rem; border-radius: 4px;
+    background: color-mix(in srgb, hsl(38 95% 55%) 12%, transparent);
+    color: hsl(38 70% 35%); border: 1px solid color-mix(in srgb, hsl(38 95% 55%) 30%, transparent);
+  }
+  [data-theme="dark"] .ot-proj-unplaced { color: hsl(38 90% 65%); }
 
   .rebal-violations { display: flex; flex-direction: column; gap: 0.2rem; width: 100%; }
   .rebal-violation-item { font-size: 0.72rem; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
