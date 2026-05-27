@@ -614,30 +614,13 @@
       })
     }
 
-    // Suggestion-only rows sorted chronologically
-    if (sugg?.type === 'create_blocks') {
-      let blockNum = 0
-      for (const block of sugg.blocks) {
-        if (block.kind !== 'new_block') continue
-        blockNum++
-        const resumeTs = new Date(block.resumeTs).getTime()
-        rows.push({ kind: 'block_header', block, blockNum, ts: resumeTs - 0.5 })
-        rows.push({ kind: 'block_resume', block, ts: resumeTs })
-        rows.push({ kind: 'block_pause',  block, ts: new Date(block.pauseTs).getTime() })
-      }
-    } else if (sugg?.type === 'create_block_logs') {
-      rows.push({ kind: 'new_resume', ts: new Date(sugg.resumeTs).getTime() })
-      rows.push({ kind: 'new_pause',  ts: new Date(sugg.pauseTs).getTime() })
-    } else if (sugg?.type === 'create_log') {
+    // New-log suggestion (single pause for an open session): shown inline in table
+    if (sugg?.type === 'create_log') {
       rows.push({ kind: 'new_log', ts: new Date(sugg.newTs).getTime() })
     }
+    // create_blocks / create_block_logs new sessions are shown as a suggestion card above the table
 
     rows.sort((a, b) => a.ts - b.ts)
-
-    // Partial warning always at end
-    if (sugg?.type === 'create_blocks' && sugg.isPartial) {
-      rows.push({ kind: 'partial_warning', ts: Infinity })
-    }
 
     return rows
   })()
@@ -1241,6 +1224,62 @@
       {/if}
     {/if}
 
+    {#if showRebalancing && logAdjustmentSuggestion}
+      {#if logAdjustmentSuggestion.type === 'create_blocks' && logAdjustmentSuggestion.blocks.some(b => b.kind === 'new_block')}
+        {@const newBlocks = logAdjustmentSuggestion.blocks.filter(b => b.kind === 'new_block')}
+        <div class="suggestion-card">
+          <div class="suggestion-card-header">
+            <span class="suggestion-card-icon">✨</span>
+            <span class="suggestion-card-title">Suggested home session{newBlocks.length > 1 ? 's' : ''}</span>
+            {#if logAdjustmentSuggestion.isPartial}
+              <span class="badge badge-warning" style="margin-left: auto;">Partial — some hours couldn't fit</span>
+            {/if}
+          </div>
+          {#each newBlocks as block, i}
+            <div class="suggestion-session-row">
+              <div class="suggestion-session-info">
+                {#if newBlocks.length > 1}<span class="suggestion-session-label">{i === 0 ? 'Evening' : 'Morning'}</span>{/if}
+                <span class="pill pill-home">home</span>
+                <strong class="tabnum">{fmtTs(block.resumeTs)}</strong>
+                <span class="suggestion-session-arrow">→</span>
+                <strong class="tabnum">{fmtTs(block.pauseTs)}</strong>
+                <span class="suggestion-delta">+{fmtDuration(block.durationMs)}</span>
+              </div>
+              <button class="btn btn-sm btn-primary" on:click={() => applyBlock(block)} disabled={isSaving}>✨ Apply</button>
+            </div>
+          {/each}
+          {#if newBlocks.length > 1}
+            <div class="suggestion-card-footer">
+              <span class="suggestion-total">Total: +{fmtDuration(logAdjustmentSuggestion.totalDeltaMs)}</span>
+            </div>
+          {/if}
+        </div>
+      {:else if logAdjustmentSuggestion.type === 'create_block_logs'}
+        {@const durMs = new Date(logAdjustmentSuggestion.pauseTs).getTime() - new Date(logAdjustmentSuggestion.resumeTs).getTime()}
+        <div class="suggestion-card">
+          <div class="suggestion-card-header">
+            <span class="suggestion-card-icon">✨</span>
+            <span class="suggestion-card-title">Suggested home session</span>
+            {#if logAdjustmentSuggestion.isPartial}
+              <span class="badge badge-warning" style="margin-left: auto;">Partial</span>
+            {/if}
+          </div>
+          <div class="suggestion-session-row">
+            <div class="suggestion-session-info">
+              <span class="pill pill-home">home</span>
+              <strong class="tabnum">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong>
+              <span class="suggestion-session-arrow">→</span>
+              <strong class="tabnum">{fmtTs(logAdjustmentSuggestion.pauseTs)}</strong>
+              <span class="suggestion-delta">+{fmtDuration(durMs)}</span>
+            </div>
+            <button class="btn btn-sm btn-primary" on:click={() => applyBlock(logAdjustmentSuggestion)} disabled={isSaving}>
+              ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
+            </button>
+          </div>
+        </div>
+      {/if}
+    {/if}
+
     {#if !selDayIsOff && selNetMs > 0 && selNetMs < $minimumDailyHours * 3_600_000}
       <div class="min-hours-warning">
         ⚠️ You logged <strong>{fmtDuration(selNetMs)}</strong>, which is below your minimum daily target of <strong>{$minimumDailyHours}h</strong>.
@@ -1312,56 +1351,6 @@
                     <button class="btn btn-sm btn-secondary" on:click={() => startEdit(log)}>✏️ Edit</button>
                   </td>
                 </tr>
-              {:else if row.kind === 'block_header'}
-                <tr class="suggested-row block-header-row">
-                  <td colspan="5" style="padding: 4px 10px; font-size: 0.78rem; font-weight: 600; color: hsl(270 70% 45%); background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2));">
-                    📊 Block {row.blockNum}: {fmtTs(row.block.resumeTs)} → {fmtTs(row.block.pauseTs)}
-                    <span style="font-weight: 400; color: var(--color-text-muted); margin-left: 4px;">({fmtDuration(row.block.durationMs)})</span>
-                    <button class="btn btn-sm btn-primary" style="margin-left: 0.5rem; padding: 1px 8px; font-size: 0.72rem;" on:click={() => applyBlock(row.block)} disabled={isSaving}>✨ Apply Both</button>
-                  </td>
-                </tr>
-              {:else if row.kind === 'block_resume'}
-                <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(row.block.resumeTs)}</strong></td>
-                  <td><span class="pill pill-home">home</span></td>
-                  <td><span class="pill pill-live">resume</span></td>
-                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                  <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('resume', row.block.resumeTs)} disabled={isSaving}>Apply</button>
-                  </td>
-                </tr>
-              {:else if row.kind === 'block_pause'}
-                <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(row.block.pauseTs)}</strong></td>
-                  <td><span class="pill pill-home">home</span></td>
-                  <td><span class="pill pill-muted">pause</span></td>
-                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                  <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 0.75rem;" on:click={() => applyCreateLog('pause', row.block.pauseTs)} disabled={isSaving}>Apply</button>
-                  </td>
-                </tr>
-              {:else if row.kind === 'new_resume'}
-                <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.resumeTs)}</strong></td>
-                  <td><span class="pill pill-home">home</span></td>
-                  <td><span class="pill pill-live">resume</span></td>
-                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                  <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('resume', logAdjustmentSuggestion.resumeTs)}>✨ Apply</button>
-                  </td>
-                </tr>
-              {:else if row.kind === 'new_pause'}
-                <tr class="suggested-row">
-                  <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.pauseTs)}</strong></td>
-                  <td><span class="pill pill-home">home</span></td>
-                  <td><span class="pill pill-muted">pause</span></td>
-                  <td class="note-cell"><span class="badge badge-success">Suggestion</span></td>
-                  <td style="display: flex; gap: 4px;">
-                    <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog('pause', logAdjustmentSuggestion.pauseTs)}>
-                      ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
-                    </button>
-                  </td>
-                </tr>
               {:else if row.kind === 'new_log'}
                 <tr class="suggested-row">
                   <td class="tabnum" style="min-width: 85px;"><strong class="cal-delta pos">{fmtTs(logAdjustmentSuggestion.newTs)}</strong></td>
@@ -1372,12 +1361,6 @@
                     <button class="btn btn-sm btn-primary" on:click={() => applyCreateLog(logAdjustmentSuggestion.action, logAdjustmentSuggestion.newTs)}>
                       ✨ {logAdjustmentSuggestion.isPartial ? 'Apply (Partial)' : 'Apply'}
                     </button>
-                  </td>
-                </tr>
-              {:else if row.kind === 'partial_warning'}
-                <tr>
-                  <td colspan="5" class="rebal-excess-warning" style="padding: 6px 10px; font-size: 0.78rem;">
-                    ⚠ Could only fit {fmtDuration(logAdjustmentSuggestion.totalDeltaMs)} in available time slots — some hours remain unplaced.
                   </td>
                 </tr>
               {/if}
@@ -1770,6 +1753,49 @@
     white-space: nowrap;
   }
 
+  /* Suggestion block card */
+  .suggestion-card {
+    border: 1.5px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface));
+    overflow: hidden;
+  }
+  .suggestion-card-header {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.45rem 0.875rem;
+    background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-2));
+    border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+  }
+  .suggestion-card-icon { font-size: 0.9rem; }
+  .suggestion-card-title { font-size: 0.8rem; font-weight: 700; color: var(--color-primary); flex: 1; }
+  .suggestion-session-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.55rem 0.875rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .suggestion-session-row:last-child { border-bottom: none; }
+  .suggestion-session-info {
+    display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+    font-variant-numeric: tabular-nums; flex: 1; font-size: 0.875rem;
+  }
+  .suggestion-session-label {
+    font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--color-text-muted); min-width: 48px;
+  }
+  .suggestion-session-arrow { color: var(--color-text-muted); }
+  .suggestion-delta {
+    font-size: 0.78rem; font-weight: 700; color: var(--color-ot-pos);
+    background: color-mix(in srgb, var(--color-ot-pos) 12%, transparent);
+    padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  }
+  .suggestion-card-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.35rem 0.875rem;
+    background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-2));
+    border-top: 1px solid var(--color-border);
+  }
+  .suggestion-total { font-size: 0.78rem; font-weight: 700; color: var(--color-primary); }
+
   .empty-state { text-align: center; color: var(--color-text-muted); padding: 3rem 0; font-size: 0.9rem; }
 
   /* Log table */
@@ -1781,7 +1807,6 @@
   .log-table tr:hover td { background: var(--color-surface-2); }
   .log-table tr.editing td { background: var(--color-primary-subtle); }
   .log-table tr.suggested-row td { background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-2)); }
-  .log-table tr.suggested-row.block-header-row td { background: color-mix(in srgb, hsl(270 70% 60%) 8%, var(--color-surface-2)); }
   .log-table tr.delete-suggested-row td { background: color-mix(in srgb, var(--color-ot-neg) 8%, var(--color-surface-2)); }
   .note-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .muted { color: var(--color-text-muted); }
