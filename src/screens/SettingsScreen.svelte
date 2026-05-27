@@ -1,4 +1,5 @@
 <script>
+  import { onMount, onDestroy } from 'svelte'
   import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocation, autoTrackEnabled } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
@@ -291,6 +292,35 @@
     showToast(autoTrackLocal ? 'Auto-track enabled' : 'Auto-track disabled', 'info')
   }
 
+  // ── Live distance from office center ─────────────────────────
+  let liveDistance = null  // metres, null = no fix yet
+  let liveWatchId = null
+
+  function _geodist(lat1, lng1, lat2, lng2) {
+    const R = 6_371_000, toRad = d => d * Math.PI / 180
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  }
+
+  onMount(() => {
+    if (!navigator?.geolocation) return
+    liveWatchId = navigator.geolocation.watchPosition(
+      pos => {
+        if (!officeLocLocal) { liveDistance = null; return }
+        liveDistance = Math.round(_geodist(pos.coords.latitude, pos.coords.longitude, officeLocLocal.lat, officeLocLocal.lng))
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5_000 }
+    )
+  })
+
+  onDestroy(() => {
+    if (liveWatchId !== null) navigator.geolocation.clearWatch(liveWatchId)
+  })
+
+  $: liveInside = liveDistance !== null && officeLocLocal ? liveDistance <= officeLocLocal.radiusMeters : null
+
   // ── Auth / Reconfig ──────────────────────────────────────────
   async function signOut() {
     const sb = getSupabase()
@@ -506,6 +536,19 @@
         <span class="office-loc-radius">Radius: {officeLocLocal.radiusMeters}m</span>
       </div>
 
+      {#if liveDistance !== null}
+        <div class="live-dist-badge {liveInside ? 'live-dist-in' : 'live-dist-out'}">
+          📡 <strong>{liveDistance.toLocaleString()} m</strong> from center
+          {#if liveInside}
+            — inside radius ✓
+          {:else}
+            — {(liveDistance - officeLocLocal.radiusMeters).toLocaleString()} m past the edge
+          {/if}
+        </div>
+      {:else}
+        <div class="live-dist-badge live-dist-pending">📡 Waiting for GPS fix…</div>
+      {/if}
+
       <div style="margin-top: 0.75rem;">
         <label for="radius-slider" style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
         <div class="hours-row" style="margin-top: 0.25rem;">
@@ -566,4 +609,8 @@
   .office-loc-display { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
   .office-loc-coord { font-size: 0.85rem; font-family: monospace; color: var(--color-text); }
   .office-loc-radius { font-size: 0.8rem; color: var(--color-text-muted); }
+  .live-dist-badge { margin-top: 0.5rem; padding: 0.4rem 0.75rem; border-radius: var(--radius-sm); font-size: 0.825rem; border: 1px solid; }
+  .live-dist-in { background: var(--color-live-subtle); color: var(--color-live); border-color: color-mix(in srgb, var(--color-live) 30%, transparent); }
+  .live-dist-out { background: var(--color-ot-neg-subtle); color: var(--color-ot-neg); border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent); }
+  .live-dist-pending { background: var(--color-surface-2); color: var(--color-text-muted); border-color: var(--color-border); }
 </style>
