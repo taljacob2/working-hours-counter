@@ -55,6 +55,9 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
       - name: Build release APK (signed)
         if: steps.signing.outputs.build_type == 'release'
         run: |
