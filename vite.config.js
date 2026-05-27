@@ -3,6 +3,6 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
   plugins: [svelte()],
-  base: '/working-hours-counter/',
+  base: process.env.CAPACITOR_BUILD ? '/' : '/working-hours-counter/',
   envPrefix: ['VITE_', 'NEXT_PUBLIC_']
 })

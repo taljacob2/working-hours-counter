@@ -1,5 +1,5 @@
 <script>
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocation, autoTrackEnabled } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -185,6 +185,76 @@
     } finally {
       importing = false
     }
+  }
+
+  // ── Office Location / Auto-Track ─────────────────────────────
+  let officeLocLocal = null
+  officeLocation.subscribe(v => officeLocLocal = v)
+
+  let autoTrackLocal = false
+  autoTrackEnabled.subscribe(v => autoTrackLocal = v)
+
+  let officeRadiusLocal = 200  // metres
+  $: if (officeLocLocal) officeRadiusLocal = officeLocLocal.radiusMeters
+
+  let capturingLocation = false
+
+  async function captureOfficeLocation() {
+    if (!navigator?.geolocation) { showToast('Geolocation not available', 'error'); return }
+    capturingLocation = true
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        capturingLocation = false
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: officeRadiusLocal }
+        officeLocLocal = loc
+        await saveOfficeLocation(loc)
+      },
+      err => {
+        capturingLocation = false
+        showToast('Could not get location: ' + err.message, 'error')
+      },
+      { enableHighAccuracy: true, timeout: 10_000 }
+    )
+  }
+
+  async function saveOfficeLocation(loc) {
+    officeLocation.set(loc)
+    localStorage.setItem('whl_office_location', JSON.stringify(loc))
+    const sb = getSupabase()
+    const { error } = await sb.from('work_settings')
+      .upsert([{ key: 'officeLocation', value: JSON.stringify(loc) }])
+    if (error) showToast('Failed to save office location', 'error')
+    else showToast('Office location saved ✓', 'success')
+  }
+
+  async function updateRadius() {
+    if (!officeLocLocal) return
+    const loc = { ...officeLocLocal, radiusMeters: officeRadiusLocal }
+    await saveOfficeLocation(loc)
+  }
+
+  async function clearOfficeLocation() {
+    officeLocLocal = null
+    officeLocation.set(null)
+    autoTrackLocal = false
+    autoTrackEnabled.set(false)
+    localStorage.removeItem('whl_office_location')
+    localStorage.setItem('whl_auto_track', 'false')
+    const sb = getSupabase()
+    await sb.from('work_settings').upsert([
+      { key: 'officeLocation', value: 'null' },
+      { key: 'autoTrackEnabled', value: 'false' },
+    ])
+    showToast('Office location cleared', 'info')
+  }
+
+  async function toggleAutoTrack() {
+    autoTrackLocal = !autoTrackLocal
+    autoTrackEnabled.set(autoTrackLocal)
+    localStorage.setItem('whl_auto_track', String(autoTrackLocal))
+    const sb = getSupabase()
+    await sb.from('work_settings').upsert([{ key: 'autoTrackEnabled', value: String(autoTrackLocal) }])
+    showToast(autoTrackLocal ? 'Auto-track enabled' : 'Auto-track disabled', 'info')
   }
 
   // ── Auth / Reconfig ──────────────────────────────────────────
@@ -386,6 +456,54 @@
     </div>
   </div>
 
+  <!-- Office Location / Auto-Track -->
+  <div class="card">
+    <p class="section-title">Office Auto-Track (GPS)</p>
+    <p class="info-text">
+      Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave your office.
+      {#if !window?.Capacitor?.isNativePlatform?.()}
+        <br><em>On web this only works while the page is open. Install the Android app for true background tracking.</em>
+      {/if}
+    </p>
+
+    {#if officeLocLocal}
+      <div class="office-loc-display">
+        <span class="office-loc-coord">📍 {officeLocLocal.lat.toFixed(5)}, {officeLocLocal.lng.toFixed(5)}</span>
+        <span class="office-loc-radius">Radius: {officeLocLocal.radiusMeters}m</span>
+      </div>
+
+      <div style="margin-top: 0.75rem;">
+        <label for="radius-slider" style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
+        <div class="hours-row" style="margin-top: 0.25rem;">
+          <input id="radius-slider" type="range" min="50" max="1000" step="50"
+            bind:value={officeRadiusLocal} on:change={updateRadius} style="flex:1" />
+          <input type="number" min="50" max="1000" step="50"
+            bind:value={officeRadiusLocal} on:change={updateRadius} style="width:80px" />
+          <span class="hours-label">m</span>
+        </div>
+      </div>
+
+      <div class="export-row" style="margin-top: 1rem;">
+        <button class="btn btn-secondary" on:click={captureOfficeLocation} disabled={capturingLocation}>
+          {capturingLocation ? '⏳ Getting location…' : '📍 Update location'}
+        </button>
+        <button class="btn {autoTrackLocal ? 'btn-primary' : 'btn-secondary'}" on:click={toggleAutoTrack}>
+          {autoTrackLocal ? '✅ Auto-track ON' : '⏸ Auto-track OFF'}
+        </button>
+        <button class="btn btn-danger" on:click={clearOfficeLocation}>✕ Clear</button>
+      </div>
+    {:else}
+      <div style="margin-top: 0.75rem;">
+        <button class="btn btn-primary" on:click={captureOfficeLocation} disabled={capturingLocation}>
+          {capturingLocation ? '⏳ Getting location…' : '📍 Set office location'}
+        </button>
+        <p class="info-text" style="margin-top: 0.5rem; font-size: 0.78rem;">
+          Go to your office, then tap this button. Your current GPS position will be saved as the office location.
+        </p>
+      </div>
+    {/if}
+  </div>
+
   <!-- Account / Reconfigure -->
   <div class="card">
     <p class="section-title">Account &amp; Connection</p>
@@ -411,4 +529,7 @@
   .info-text { font-size: 0.875rem; color: var(--color-text-muted); line-height: 1.6; }
   .info-text code { font-size: 0.8rem; background: var(--color-surface-2); padding: 2px 6px; border-radius: 4px; }
   .account-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+  .office-loc-display { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
+  .office-loc-coord { font-size: 0.85rem; font-family: monospace; color: var(--color-text); }
+  .office-loc-radius { font-size: 0.8rem; color: var(--color-text-muted); }
 </style>

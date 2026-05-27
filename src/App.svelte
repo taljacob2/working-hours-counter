@@ -1,7 +1,9 @@
 <script>
-  import { onMount } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides } from './stores/appStore.js'
+  import { onMount, onDestroy } from 'svelte'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocation, autoTrackEnabled, showToast } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
+  import { GeoFenceWatcher } from './lib/geoFence.js'
+  import { dateKey } from './lib/timeUtils.js'
 
   import Spinner     from './components/Spinner.svelte'
   import Toast       from './components/Toast.svelte'
@@ -36,7 +38,58 @@
     user.set(session.user)
     await loadAll(sb)
     screen.set('main')
+    startGeoFence()
   })
+
+  // ── GeoFence watcher ─────────────────────────────────────────
+  let geoWatcher = null
+
+  function startGeoFence() {
+    stopGeoFence()
+    const loc = $officeLocation
+    const enabled = $autoTrackEnabled
+    if (!enabled || !loc) return
+
+    geoWatcher = new GeoFenceWatcher({
+      location: loc,
+      onEnter: () => pressOffice('resume'),
+      onLeave: () => pressOffice('pause'),
+    })
+    geoWatcher.start()
+  }
+
+  function stopGeoFence() {
+    geoWatcher?.stop()
+    geoWatcher = null
+  }
+
+  // Re-start whenever settings change
+  $: if ($autoTrackEnabled !== undefined || $officeLocation !== undefined) startGeoFence()
+
+  onDestroy(stopGeoFence)
+
+  async function pressOffice(action) {
+    const sb = getSupabase()
+    const today = dateKey()
+    const { data: todayLogs } = await sb.from('work_logs')
+      .select('*').eq('date_key', today).eq('platform', 'office')
+      .order('timestamp', { ascending: false }).limit(1)
+    const last = todayLogs?.[0]
+    if (last?.action === action) return  // already in this state — idempotent
+    const entry = {
+      id: crypto.randomUUID(),
+      platform: 'office',
+      action,
+      timestamp: new Date().toISOString(),
+      date_key: today,
+      created_at: new Date().toISOString(),
+      note: '',
+    }
+    const { error } = await sb.from('work_logs').insert(entry)
+    if (error) { showToast('Auto-track save failed: ' + error.message, 'error'); return }
+    logs.update(l => [...l, entry])
+    showToast(`🏢 Auto-tracked: office ${action}d`, 'success')
+  }
 
   async function loadAll(sb) {
     loading.set(true)
@@ -70,6 +123,15 @@
       const dayOverridesLocal = localStorage.getItem('whl_day_overrides')
       const dayOverridesRaw = dayOverridesVal ?? dayOverridesLocal ?? '{}'
       try { dayOverrides.set(JSON.parse(dayOverridesRaw)) } catch { dayOverrides.set({}) }
+
+      const officeLoc = settings?.find(s => s.key === 'officeLocation')?.value
+      const officeLocLocal = localStorage.getItem('whl_office_location')
+      const officeLocRaw = officeLoc ?? officeLocLocal ?? 'null'
+      try { officeLocation.set(JSON.parse(officeLocRaw)) } catch { officeLocation.set(null) }
+
+      const autoTrackVal = settings?.find(s => s.key === 'autoTrackEnabled')?.value
+      const autoTrackLocal = localStorage.getItem('whl_auto_track')
+      autoTrackEnabled.set((autoTrackVal ?? autoTrackLocal) === 'true')
     } catch (e) {
       console.error('loadAll error', e)
     } finally {
