@@ -248,9 +248,15 @@
   async function saveOfficeLocation(loc) {
     officeLocation.set(loc)
     localStorage.setItem('whl_office_location', JSON.stringify(loc))
+    const upsertRows = [{ key: 'officeLocation', value: JSON.stringify(loc) }]
+    if (!autoTrackLocal) {
+      autoTrackLocal = true
+      autoTrackEnabled.set(true)
+      localStorage.setItem('whl_auto_track', 'true')
+      upsertRows.push({ key: 'autoTrackEnabled', value: 'true' })
+    }
     const sb = getSupabase()
-    const { error } = await sb.from('work_settings')
-      .upsert([{ key: 'officeLocation', value: JSON.stringify(loc) }])
+    const { error } = await sb.from('work_settings').upsert(upsertRows)
     if (error) showToast('Failed to save office location', 'error')
     else showToast('Office location saved ✓', 'success')
   }

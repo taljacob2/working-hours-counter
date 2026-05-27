@@ -32,7 +32,8 @@ export class GeoFenceWatcher {
   #location       // { lat, lng, radiusMeters }
   #onEnter        // () => void
   #onLeave        // () => void
-  #insideOffice = null   // null=unknown, true=inside, false=outside
+  #insideOffice = null   // confirmed state: null=unknown, true=inside, false=outside
+  #pendingInside = null  // transition being waited on (null = none)
   #watchId = null       // web watchPosition ID
   #nativePlugin = null  // @capgo/background-geolocation plugin ref
   #hysteresisTimer = null
@@ -53,7 +54,7 @@ export class GeoFenceWatcher {
   }
 
   stop() {
-    if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null }
+    if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null; this.#pendingInside = null }
     if (this.#nativePlugin) {
       this.#nativePlugin.removeAllListeners?.()
       this.#nativePlugin.stopBackgroundTask?.()
@@ -67,7 +68,9 @@ export class GeoFenceWatcher {
 
   updateLocation(location) {
     this.#location = location
-    this.#insideOffice = null  // reset state — next position update will re-evaluate
+    this.#insideOffice = null   // reset confirmed state — next position update re-evaluates
+    this.#pendingInside = null
+    if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null }
   }
 
   // ── Native (Capacitor background geolocation) ─────────────────
@@ -112,15 +115,26 @@ export class GeoFenceWatcher {
     const nowInside = dist <= this.#location.radiusMeters
 
     if (nowInside === this.#insideOffice) {
-      // No boundary crossing — cancel any pending hysteresis timer
-      if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null }
+      // Back to confirmed state — cancel any pending transition (bounce-back)
+      if (this.#hysteresisTimer) {
+        clearTimeout(this.#hysteresisTimer)
+        this.#hysteresisTimer = null
+        this.#pendingInside = null
+      }
       return
     }
 
-    // Boundary crossing detected — start hysteresis timer
+    if (nowInside === this.#pendingInside) {
+      // Already waiting to confirm this direction — don't reset the timer
+      return
+    }
+
+    // New transition direction — start/restart hysteresis timer
     if (this.#hysteresisTimer) clearTimeout(this.#hysteresisTimer)
+    this.#pendingInside = nowInside
     this.#hysteresisTimer = setTimeout(() => {
       this.#hysteresisTimer = null
+      this.#pendingInside = null
       this.#insideOffice = nowInside
       if (nowInside) this.#onEnter()
       else           this.#onLeave()
