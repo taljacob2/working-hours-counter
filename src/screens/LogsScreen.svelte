@@ -996,19 +996,35 @@
             {#if otProjection?.breakdown.length}
               <details class="ot-proj-breakdown">
                 <summary>Why does OT change?</summary>
+                <div class="ot-proj-steps">
+                  <div class="ot-proj-step">
+                    <span class="ot-proj-step-num">1</span>
+                    <span>Days that logged <strong>more than {$maximumDailyHours}h</strong> have their home sessions shortened. The trimmed hours are moved to days that logged <strong>less than {$minimumDailyHours}h</strong> to bring them up to the minimum. OT is preserved in this exchange.</span>
+                  </div>
+                  <div class="ot-proj-step">
+                    <span class="ot-proj-step-num">2</span>
+                    <span>If over-limit days still have surplus after step 1, extra home sessions are added in the morning or evening of other working days — up to {$maximumDailyHours}h. OT is preserved here too, <em>unless</em> there is no free time slot available (morning and evening already occupied).</span>
+                  </div>
+                  {#if otProjection.unplacedMs > 0}
+                    <div class="ot-proj-step ot-proj-step--warn">
+                      <span class="ot-proj-step-num">3</span>
+                      <span><strong>{fmtDuration(otProjection.unplacedMs)} could not be placed on any other day</strong> — every working day either already reached {$maximumDailyHours}h or had no free morning/evening slot. Those hours are trimmed with nowhere to go. <strong>This is the only reason OT decreases.</strong></span>
+                    </div>
+                  {/if}
+                </div>
                 <table class="ot-proj-table">
-                  <thead><tr><th>Day</th><th>Role</th><th>OT now</th><th>OT after</th><th>&Delta;</th></tr></thead>
+                  <thead><tr><th>Day</th><th>What happens</th><th>OT now</th><th>OT after</th><th>&Delta;</th></tr></thead>
                   <tbody>
                     {#each otProjection.breakdown as row}
                       <tr>
                         <td>{fmtKeyShort(row.dk)}</td>
                         <td>
                           {#if row.isDonor}
-                            <span class="pill pill-ot-neg" style="font-size:0.68rem;">↓ donor</span>
+                            <span class="pill pill-ot-neg" style="font-size:0.68rem;">Hours trimmed (over {$maximumDailyHours}h)</span>
                           {:else if row.isExcessOt}
-                            <span class="pill pill-excess-ot" style="font-size:0.68rem;">↑ OT transfer</span>
+                            <span class="pill pill-excess-ot" style="font-size:0.68rem;">Home sessions added (step 2)</span>
                           {:else}
-                            <span class="pill pill-ot-pos" style="font-size:0.68rem;">↑ deficit fill</span>
+                            <span class="pill pill-ot-pos" style="font-size:0.68rem;">Hours received (under {$minimumDailyHours}h)</span>
                           {/if}
                         </td>
                         <td style="color:{row.currentOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.currentOt,true)}</td>
@@ -1018,25 +1034,7 @@
                     {/each}
                   </tbody>
                 </table>
-                <div class="ot-proj-legend">
-                  <div class="ot-proj-legend-item">
-                    <span class="pill pill-ot-neg" style="font-size:0.68rem;">↓ donor</span>
-                    <span>This day exceeded {$maximumDailyHours}h. Home sessions are shortened or removed to bring it under the limit — those hours are transferred to other days.</span>
-                  </div>
-                  <div class="ot-proj-legend-item">
-                    <span class="pill pill-ot-pos" style="font-size:0.68rem;">↑ deficit fill</span>
-                    <span>This day had too few hours logged. Hours received from donor days first go toward completing the {$requiredHours}h daily requirement — only anything above {$requiredHours}h counts as OT. For example: adding 2h to a day with 7h brings it to 9h, which is exactly the requirement — so OT on this day doesn't increase at all.</span>
-                  </div>
-                  <div class="ot-proj-legend-item">
-                    <span class="pill pill-excess-ot" style="font-size:0.68rem;">↑ OT transfer</span>
-                    <span>This day already met its daily requirement. Extra home sessions are added in the morning or evening to absorb surplus hours from over-limit days — every added hour counts as full OT.</span>
-                  </div>
-                </div>
-                {#if otProjection.unplacedMs > 0}
-                  <p class="ot-proj-unplaced">
-                    ⚠ {fmtDuration(otProjection.unplacedMs)} could not be placed anywhere — every other working day either already reached {$maximumDailyHours}h, or had no free morning/evening slot to schedule extra home work. Trimming those hours from the over-limit day without a recipient is the only reason OT decreases.
-                  </p>
-                {/if}
+                <p class="ot-proj-note">Tip: days receiving hours in step 1 may show a smaller OT gain than expected — received hours first complete the {$requiredHours}h daily requirement before counting as OT.</p>
               </details>
             {/if}
           </div>
@@ -1566,12 +1564,27 @@
     color: var(--color-text-muted); font-weight: 600;
     text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.03em;
   }
-  .ot-proj-legend { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
-  .ot-proj-legend-item {
+  .ot-proj-steps { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; margin-bottom: 0.6rem; }
+  .ot-proj-step {
     display: flex; align-items: flex-start; gap: 0.5rem;
-    font-size: 0.75rem; color: var(--color-text-muted); line-height: 1.4;
+    font-size: 0.75rem; color: var(--color-text-muted); line-height: 1.45;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: 5px; padding: 0.35rem 0.5rem;
   }
-  .ot-proj-legend-item .pill { flex-shrink: 0; margin-top: 1px; }
+  .ot-proj-step--warn {
+    background: color-mix(in srgb, hsl(38 95% 55%) 10%, transparent);
+    border-color: color-mix(in srgb, hsl(38 95% 55%) 35%, transparent);
+    color: hsl(38 65% 32%);
+  }
+  [data-theme="dark"] .ot-proj-step--warn { color: hsl(38 85% 65%); }
+  .ot-proj-step-num {
+    flex-shrink: 0; width: 1.1rem; height: 1.1rem;
+    background: var(--color-primary); color: #fff;
+    border-radius: 50%; font-size: 0.65rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px;
+  }
+  .ot-proj-step--warn .ot-proj-step-num { background: hsl(38 85% 48%); }
   .ot-proj-unplaced {
     font-size: 0.75rem; margin: 0.4rem 0 0;
     padding: 0.3rem 0.5rem; border-radius: 4px;
