@@ -1018,14 +1018,23 @@
                     {/each}
                   </tbody>
                 </table>
-                <p class="ot-proj-note">
-                  <strong>↓ donor</strong> — sessions trimmed, OT removed. &nbsp;
-                  <strong>↑ deficit fill</strong> — hours added, but first cover the {$requiredHours}h requirement; only the excess becomes OT. &nbsp;
-                  <strong>↑ OT transfer</strong> — surplus added as new home sessions on top of existing work; counts as full OT.
-                </p>
+                <div class="ot-proj-legend">
+                  <div class="ot-proj-legend-item">
+                    <span class="pill pill-ot-neg" style="font-size:0.68rem;">↓ donor</span>
+                    <span>This day exceeded {$maximumDailyHours}h. Home sessions are shortened or removed to bring it under the limit — those hours are transferred to other days.</span>
+                  </div>
+                  <div class="ot-proj-legend-item">
+                    <span class="pill pill-ot-pos" style="font-size:0.68rem;">↑ deficit fill</span>
+                    <span>This day had too few hours logged. Hours received from donor days first go toward completing the {$requiredHours}h daily requirement — only anything above {$requiredHours}h counts as OT. For example: adding 2h to a day with 7h brings it to 9h, which is exactly the requirement — so OT on this day doesn't increase at all.</span>
+                  </div>
+                  <div class="ot-proj-legend-item">
+                    <span class="pill pill-excess-ot" style="font-size:0.68rem;">↑ OT transfer</span>
+                    <span>This day already met its daily requirement. Extra home sessions are added in the morning or evening to absorb surplus hours from over-limit days — every added hour counts as full OT.</span>
+                  </div>
+                </div>
                 {#if otProjection.unplacedMs > 0}
                   <p class="ot-proj-unplaced">
-                    ⚠ {fmtDuration(otProjection.unplacedMs)} of excess could not be redistributed — all eligible working days in this month are already at the {$maximumDailyHours}h maximum (or have no remaining capacity). This is the sole reason OT decreases.
+                    ⚠ {fmtDuration(otProjection.unplacedMs)} could not be placed anywhere — every other working day either already reached {$maximumDailyHours}h, or had no free morning/evening slot to schedule extra home work. Trimming those hours from the over-limit day without a recipient is the only reason OT decreases.
                   </p>
                 {/if}
               </details>
@@ -1557,10 +1566,12 @@
     color: var(--color-text-muted); font-weight: 600;
     text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.03em;
   }
-  .ot-proj-note {
-    font-size: 0.72rem; color: var(--color-text-muted);
-    font-style: italic; margin: 0.35rem 0 0;
+  .ot-proj-legend { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+  .ot-proj-legend-item {
+    display: flex; align-items: flex-start; gap: 0.5rem;
+    font-size: 0.75rem; color: var(--color-text-muted); line-height: 1.4;
   }
+  .ot-proj-legend-item .pill { flex-shrink: 0; margin-top: 1px; }
   .ot-proj-unplaced {
     font-size: 0.75rem; margin: 0.4rem 0 0;
     padding: 0.3rem 0.5rem; border-radius: 4px;
