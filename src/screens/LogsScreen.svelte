@@ -21,11 +21,11 @@
   $: calYear  = $calCursor.getFullYear()
   $: calMonth = $calCursor.getMonth() + 1
 
-  $: calDays = buildCalendar(calYear, calMonth, $logs)
+  $: calDays = buildCalendar(calYear, calMonth, $logs, $offDays, $dayOverrides, $requiredHours, $minimumDailyHours, $maximumDailyHours, now)
   $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
   $: daysLogged = loggedDaysInMonth($logs, calYear, calMonth).length
 
-  function buildCalendar(year, month, logsArr) {
+  function buildCalendar(year, month, logsArr, offDaysArr, dayOverridesObj, reqHours, minHours, maxHours, currentTime) {
     const first = new Date(year, month - 1, 1)
     const last  = new Date(year, month, 0)
     const cells = []
@@ -35,16 +35,16 @@
       const key = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`
       const dl  = logsArr.filter(l => l.date_key === key).sort(byTs)
       const isOpen = dl.length > 0 && dl.at(-1).action === 'resume'
-      const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? now : (isOpen ? null : null))
-      const reqMs  = $requiredHours * 3_600_000
-      const minMs  = $minimumDailyHours * 3_600_000
-      const dayIsOff = isOffDay(key, $offDays, $dayOverrides)
-      const hasOverride = $dayOverrides[key] != null
+      const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? currentTime : null)
+      const reqMs  = reqHours * 3_600_000
+      const minMs  = minHours * 3_600_000
+      const dayIsOff = isOffDay(key, offDaysArr, dayOverridesObj)
+      const hasOverride = dayOverridesObj[key] != null
       const otMs   = dl.length > 0 ? (dayIsOff ? netMs : netMs - reqMs) : null
-      const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? now : null)
-      const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? now : null)
+      const offMs  = computeNetMs(dl.filter(l => l.platform === 'office'), (isOpen && key === todayKey) ? currentTime : null)
+      const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? currentTime : null)
       const underMin = !dayIsOff && netMs > 0 && netMs < minMs
-      const aboveMax = !dayIsOff && netMs > $maximumDailyHours * 3_600_000
+      const aboveMax = !dayIsOff && netMs > maxHours * 3_600_000
       cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff, hasOverride })
     }
     return cells
