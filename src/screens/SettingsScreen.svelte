@@ -113,8 +113,17 @@
     const { start, end } = monthBounds(expYear, expMonth)
     const subset = $logs.filter(l => l.date_key >= start && l.date_key <= end)
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
+    const monthDayOverrides = Object.fromEntries(
+      Object.entries($dayOverrides).filter(([dk]) => dk >= start && dk <= end)
+    )
     const fileName = `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.json`
-    const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), month: `${expYear}-${String(expMonth).padStart(2,'0')}`, logs: subset }, null, 2)], { type: 'application/json' })
+    const payload = {
+      exported_at: new Date().toISOString(),
+      month: `${expYear}-${String(expMonth).padStart(2,'0')}`,
+      day_schedule: monthDayOverrides,
+      logs: subset,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = fileName; a.click()
     URL.revokeObjectURL(url)
@@ -134,15 +143,19 @@
     if (!importLogs.every(l => required.every(f => l[f] != null))) {
       showToast('Invalid log format — missing required fields', 'error'); return null
     }
-    return importLogs
+    const importDayOverrides = (parsed.day_schedule && typeof parsed.day_schedule === 'object' && !Array.isArray(parsed.day_schedule))
+      ? parsed.day_schedule
+      : {}
+    return { logs: importLogs, dayOverrides: importDayOverrides }
   }
 
   async function doImportMerge() {
     if (!importFile) return
     importing = true
     try {
-      const importLogs = parseImportFile(await importFile.text())
-      if (!importLogs) return
+      const parsed = parseImportFile(await importFile.text())
+      if (!parsed) return
+      const { logs: importLogs, dayOverrides: importDayOverrides } = parsed
       const sb = getSupabase()
       const { error } = await sb.from('work_logs').upsert(importLogs, { onConflict: 'id' })
       if (error) { showToast('Import failed: ' + error.message, 'error'); return }
@@ -150,6 +163,12 @@
         const importIds = new Set(importLogs.map(l => l.id))
         return [...ls.filter(l => !importIds.has(l.id)), ...importLogs]
       })
+      if (Object.keys(importDayOverrides).length) {
+        const merged = { ...$dayOverrides, ...importDayOverrides }
+        dayOverrides.set(merged)
+        localStorage.setItem('whl_day_overrides', JSON.stringify(merged))
+        await sb.from('work_settings').upsert([{ key: 'dayOverrides', value: JSON.stringify(merged) }])
+      }
       showToast(`Merged ${importLogs.length} records`, 'success')
       importFile = null
       if (importFileInput) importFileInput.value = ''
@@ -164,8 +183,9 @@
     if (!importFile) return
     importing = true
     try {
-      const importLogs = parseImportFile(await importFile.text())
-      if (!importLogs) return
+      const parsed = parseImportFile(await importFile.text())
+      if (!parsed) return
+      const { logs: importLogs, dayOverrides: importDayOverrides } = parsed
       const months = [...new Set(importLogs.map(l => l.date_key.slice(0, 7)))]
       const sb = getSupabase()
       for (const month of months) {
@@ -177,6 +197,14 @@
       if (error) { showToast('Replace failed: ' + error.message, 'error'); return }
       const monthSet = new Set(months)
       logs.update(ls => [...ls.filter(l => !monthSet.has(l.date_key.slice(0, 7))), ...importLogs])
+      // Drop overrides belonging to the replaced months, then apply imported ones
+      const updatedOverrides = Object.fromEntries(
+        Object.entries($dayOverrides).filter(([dk]) => !monthSet.has(dk.slice(0, 7)))
+      )
+      Object.assign(updatedOverrides, importDayOverrides)
+      dayOverrides.set(updatedOverrides)
+      localStorage.setItem('whl_day_overrides', JSON.stringify(updatedOverrides))
+      await sb.from('work_settings').upsert([{ key: 'dayOverrides', value: JSON.stringify(updatedOverrides) }])
       showToast(`Replaced ${months.join(', ')} — ${importLogs.length} records`, 'success')
       importFile = null
       if (importFileInput) importFileInput.value = ''
