@@ -22,8 +22,8 @@ Both pipelines trigger automatically and run in parallel. A failure in one does 
 - A [GitHub](https://github.com) account with this repository forked/cloned
 - A [Supabase](https://supabase.com) account (free tier is enough)
 - **For Android signing only:** Java JDK installed locally to run `keytool`
-  - Windows: install [Eclipse Temurin 17](https://adoptium.net/) — verify with `keytool -version`
-  - macOS: comes with the JDK, or `brew install openjdk@17`
+  - Windows: install [Eclipse Temurin 21](https://adoptium.net/) — verify with `keytool -version`
+  - macOS: comes with the JDK, or `brew install openjdk@21`
 
 ---
 
