@@ -126,30 +126,58 @@
   let importFile = null
   let importing = false
 
-  async function doImportJson() {
+  function parseImportFile(text) {
+    const parsed = JSON.parse(text)
+    const importLogs = Array.isArray(parsed) ? parsed : parsed.logs
+    if (!importLogs?.length) { showToast('No logs found in file', 'error'); return null }
+    const required = ['id', 'timestamp', 'platform', 'action', 'date_key']
+    if (!importLogs.every(l => required.every(f => l[f] != null))) {
+      showToast('Invalid log format — missing required fields', 'error'); return null
+    }
+    return importLogs
+  }
+
+  async function doImportMerge() {
     if (!importFile) return
     importing = true
     try {
-      const text = await importFile.text()
-      const parsed = JSON.parse(text)
-      const importLogs = Array.isArray(parsed) ? parsed : parsed.logs
-      if (!importLogs?.length) { showToast('No logs found in file', 'error'); return }
-
-      const required = ['id', 'timestamp', 'platform', 'action', 'date_key']
-      if (!importLogs.every(l => required.every(f => l[f] != null))) {
-        showToast('Invalid log format — missing required fields', 'error'); return
-      }
-
+      const importLogs = parseImportFile(await importFile.text())
+      if (!importLogs) return
       const sb = getSupabase()
       const { error } = await sb.from('work_logs').upsert(importLogs, { onConflict: 'id' })
       if (error) { showToast('Import failed: ' + error.message, 'error'); return }
-
       logs.update(ls => {
         const importIds = new Set(importLogs.map(l => l.id))
         return [...ls.filter(l => !importIds.has(l.id)), ...importLogs]
       })
+      showToast(`Merged ${importLogs.length} records`, 'success')
+      importFile = null
+      if (importFileInput) importFileInput.value = ''
+    } catch (e) {
+      showToast('Import failed: ' + e.message, 'error')
+    } finally {
+      importing = false
+    }
+  }
 
-      showToast(`Imported ${importLogs.length} records`, 'success')
+  async function doImportReplace() {
+    if (!importFile) return
+    importing = true
+    try {
+      const importLogs = parseImportFile(await importFile.text())
+      if (!importLogs) return
+      const months = [...new Set(importLogs.map(l => l.date_key.slice(0, 7)))]
+      const sb = getSupabase()
+      for (const month of months) {
+        const { error } = await sb.from('work_logs')
+          .delete().gte('date_key', `${month}-01`).lte('date_key', `${month}-31`)
+        if (error) { showToast('Replace failed: ' + error.message, 'error'); return }
+      }
+      const { error } = await sb.from('work_logs').insert(importLogs)
+      if (error) { showToast('Replace failed: ' + error.message, 'error'); return }
+      const monthSet = new Set(months)
+      logs.update(ls => [...ls.filter(l => !monthSet.has(l.date_key.slice(0, 7))), ...importLogs])
+      showToast(`Replaced ${months.join(', ')} — ${importLogs.length} records`, 'success')
       importFile = null
       if (importFileInput) importFileInput.value = ''
     } catch (e) {
@@ -331,7 +359,16 @@
   <!-- Import -->
   <div class="card">
     <p class="section-title">Import Logs from JSON</p>
-    <p class="info-text">Restore a previously exported JSON snapshot. Existing records with matching IDs will be overwritten.</p>
+    <div class="import-modes">
+      <div class="import-mode">
+        <strong>Merge</strong>
+        <span class="info-text">Upserts records by ID — existing logs not in the file are kept.</span>
+      </div>
+      <div class="import-mode">
+        <strong>Replace</strong>
+        <span class="info-text">Deletes all logs for the file's month(s) first, then inserts the imported records. True restore.</span>
+      </div>
+    </div>
     <div class="export-row" style="margin-top: 0.75rem;">
       <input
         bind:this={importFileInput}
@@ -340,8 +377,11 @@
         on:change={e => importFile = e.target.files[0] ?? null}
         style="flex: 1; font-size: 0.875rem;"
       />
-      <button class="btn btn-primary" on:click={doImportJson} disabled={!importFile || importing}>
-        {importing ? '⏳ Importing…' : '⬆ Import JSON'}
+      <button class="btn btn-secondary" on:click={doImportMerge} disabled={!importFile || importing}>
+        {importing ? '⏳…' : '⬆ Merge'}
+      </button>
+      <button class="btn btn-primary" on:click={doImportReplace} disabled={!importFile || importing}>
+        {importing ? '⏳…' : '⬆ Replace'}
       </button>
     </div>
   </div>
@@ -364,6 +404,9 @@
   .hours-label { font-size: 0.875rem; color: var(--color-text-muted); white-space: nowrap; }
   input[type="range"] { accent-color: var(--color-primary); }
   .export-row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+  .import-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem; }
+  .import-mode { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.5rem 0.75rem; border-radius: var(--radius-sm); background: var(--color-surface-2); border: 1px solid var(--color-border); font-size: 0.8rem; }
+  .import-mode strong { font-size: 0.82rem; color: var(--color-text); }
   .export-count { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.5rem; }
   .info-text { font-size: 0.875rem; color: var(--color-text-muted); line-height: 1.6; }
   .info-text code { font-size: 0.8rem; background: var(--color-surface-2); padding: 2px 6px; border-radius: 4px; }
