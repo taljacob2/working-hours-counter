@@ -6,6 +6,9 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -82,3 +85,16 @@ jobs:
           path: android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 90
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DATE=$(date -u +"%Y-%m-%d-%H%M%S")
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          TAG="android-${DATE}-${SHORT_SHA}"
+          APK=$(find android/app/build/outputs/apk -name "*.apk" | head -1)
+          gh release create "$TAG" "$APK" \
+            --title "Android ${DATE} · ${SHORT_SHA}" \
+            --notes "Automated build from [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) on \`${{ github.ref_name }}\`"
