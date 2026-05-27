@@ -148,9 +148,11 @@ label { font-size: 0.875rem; font-weight: 500; color: var(--color-text-muted); d
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.pill-primary { background: var(--color-primary-subtle); color: var(--color-primary); }
-.pill-ot-pos  { background: var(--color-ot-pos-subtle);  color: var(--color-ot-pos); }
-.pill-ot-neg  { background: var(--color-ot-neg-subtle);  color: var(--color-ot-neg); }
+.pill-primary  { background: var(--color-primary-subtle); color: var(--color-primary); }
+.pill-ot-pos   { background: var(--color-ot-pos-subtle);  color: var(--color-ot-pos); }
+.pill-ot-neg   { background: var(--color-ot-neg-subtle);  color: var(--color-ot-neg); }
+.pill-excess-ot { background: color-mix(in srgb, hsl(270 70% 60%) 15%, transparent); color: hsl(270 60% 55%); }
+[data-theme="dark"] .pill-excess-ot { color: hsl(270 70% 75%); }
 .pill-live    { background: var(--color-live-subtle);    color: var(--color-live); }
 .pill-office  { background: var(--color-office-subtle);  color: var(--color-office); }
 .pill-home    { background: var(--color-home-subtle);    color: var(--color-home); }

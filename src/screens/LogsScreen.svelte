@@ -330,12 +330,17 @@
       if (delta === 0) continue
       const dayCell = calDays.find(c => c?.key === dk)
       const currentOt = dayCell?.otMs ?? 0
-      const isDonor = rebalancing.stillAboveMax.includes(dk)
-      breakdown.push({ dk, isDonor, currentOt, projectedOt: currentOt + delta, delta })
+      const isDonor    = rebalancing.stillAboveMax.includes(dk)
+      const isExcessOt = !isDonor && (rebalancing.excessOtRecipients?.has(dk) ?? false)
+      breakdown.push({ dk, isDonor, isExcessOt, currentOt, projectedOt: currentOt + delta, delta })
       totalDelta += delta
     }
     if (!breakdown.length) return null
-    breakdown.sort((a, b) => (a.isDonor === b.isDonor ? 0 : a.isDonor ? -1 : 1))
+    // donors first, then excess-OT recipients, then regular recipients
+    breakdown.sort((a, b) => {
+      const rank = r => r.isDonor ? 0 : r.isExcessOt ? 1 : 2
+      return rank(a) - rank(b)
+    })
     return { projectedOt: cumOt + totalDelta, delta: totalDelta, breakdown }
   })()
 
@@ -962,7 +967,15 @@
                     {#each otProjection.breakdown as row}
                       <tr>
                         <td>{fmtKeyShort(row.dk)}</td>
-                        <td><span class="pill {row.isDonor?'pill-ot-neg':'pill-ot-pos'}" style="font-size:0.68rem;">{row.isDonor?'↓ donor':'↑ recipient'}</span></td>
+                        <td>
+                          {#if row.isDonor}
+                            <span class="pill pill-ot-neg" style="font-size:0.68rem;">↓ donor</span>
+                          {:else if row.isExcessOt}
+                            <span class="pill pill-excess-ot" style="font-size:0.68rem;">↑ OT transfer</span>
+                          {:else}
+                            <span class="pill pill-ot-pos" style="font-size:0.68rem;">↑ deficit fill</span>
+                          {/if}
+                        </td>
                         <td style="color:{row.currentOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.currentOt,true)}</td>
                         <td style="color:{row.projectedOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.projectedOt,true)}</td>
                         <td style="color:{row.delta<0?'var(--color-ot-neg)':'var(--color-ot-pos)'}; font-weight:700;">{fmtDuration(row.delta,true)}</td>
@@ -970,7 +983,11 @@
                     {/each}
                   </tbody>
                 </table>
-                <p class="ot-proj-note">Donor days lose OT when sessions are trimmed. Hours added to recipient days first fill the {$requiredHours}h daily requirement — only the excess counts as OT.</p>
+                <p class="ot-proj-note">
+                  <strong>↓ donor</strong> — sessions trimmed, OT removed. &nbsp;
+                  <strong>↑ deficit fill</strong> — hours added, but first cover the {$requiredHours}h requirement; only the excess becomes OT. &nbsp;
+                  <strong>↑ OT transfer</strong> — surplus added as new home sessions on top of existing work; counts as full OT.
+                </p>
               </details>
             {/if}
           </div>
