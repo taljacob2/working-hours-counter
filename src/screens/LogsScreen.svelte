@@ -21,11 +21,11 @@
   $: calYear  = $calCursor.getFullYear()
   $: calMonth = $calCursor.getMonth() + 1
 
-  $: calDays = buildCalendar(calYear, calMonth)
+  $: calDays = buildCalendar(calYear, calMonth, $logs)
   $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
   $: daysLogged = loggedDaysInMonth($logs, calYear, calMonth).length
 
-  function buildCalendar(year, month) {
+  function buildCalendar(year, month, logsArr) {
     const first = new Date(year, month - 1, 1)
     const last  = new Date(year, month, 0)
     const cells = []
@@ -33,7 +33,7 @@
     for (let i = 0; i < first.getDay(); i++) cells.push(null)
     for (let d = 1; d <= last.getDate(); d++) {
       const key = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`
-      const dl  = $logs.filter(l => l.date_key === key).sort(byTs)
+      const dl  = logsArr.filter(l => l.date_key === key).sort(byTs)
       const isOpen = dl.length > 0 && dl.at(-1).action === 'resume'
       const netMs  = computeNetMs(dl, (isOpen && key === todayKey) ? now : (isOpen ? null : null))
       const reqMs  = $requiredHours * 3_600_000
