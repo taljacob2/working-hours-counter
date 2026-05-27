@@ -102,7 +102,9 @@ Go to **Settings → Secrets and variables → Actions → Secrets** and add:
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase Project URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Your Supabase anon/public key |
 
-> These are compiled into the web app at build time. Alternatively, the app's built-in config screen lets users enter credentials manually via the browser (stored in `localStorage`) — useful if you prefer not to bake them into the build.
+> **Important:** Add these at the **repository level** (the main Secrets list), not inside the `github-pages` environment. Environment secrets are only injected into jobs that declare `environment: github-pages` — the Android build job does not, so it would receive empty values and the APK would ship without credentials baked in.
+>
+> These are compiled into both the web app and the Android APK at build time. Alternatively, the app's built-in config screen lets users enter credentials manually on first launch (stored in `localStorage`) — useful if you prefer not to bake them into the build.
 
 ### 2.3 Trigger the first deploy
 
