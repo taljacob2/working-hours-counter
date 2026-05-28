@@ -193,6 +193,14 @@
     // Days that have at least one home-platform log — only these can be trimmed as donors
     const daysWithHomeLogs = new Set(logs.filter(l => l.platform === 'home').map(l => l.date_key))
 
+    // Days with an open (unpaused) session — excluded from being recipients because their
+    // netMs changes every second, making the rebalancing plan unstable while they're active
+    const openSessionDays = new Set()
+    for (const dk of [...new Set(logs.map(l => l.date_key))]) {
+      const dl = logs.filter(l => l.date_key === dk).sort(byTs)
+      if (dl.at(-1)?.action === 'resume') openSessionDays.add(dk)
+    }
+
     const transfers = []
 
     // Pass 1: off-day home hours → working days.
@@ -202,10 +210,10 @@
       const floor = donor.offMs
       while (donor.currentMs > floor) {
         const underReq = days
-          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs)
+          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs && !openSessionDays.has(d.key))
           .sort((a, b) => a.currentMs - b.currentMs)[0]
         const underMax = !underReq && days
-          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs)
+          .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs && !openSessionDays.has(d.key))
           .sort((a, b) => a.currentMs - b.currentMs)[0]
         const rec = underReq || underMax
         if (!rec) break
@@ -221,7 +229,7 @@
 
     // Pass 2: fix remaining working-day deficits (under-required ← above-max / OT donors).
     const recipients = days
-      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs)
+      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < reqMs && !openSessionDays.has(d.key))
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of recipients) {
@@ -255,7 +263,7 @@
     // never over-trim donors relative to what can actually be absorbed.
     for (const d of days) d.tappedOut3 = false
     const pass3Recipients = days
-      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs)
+      .filter(d => !d.isOff && d.currentMs > 0 && d.currentMs < maxMs && !openSessionDays.has(d.key))
       .sort((a, b) => a.currentMs - b.currentMs)
 
     for (const rec of pass3Recipients) {
