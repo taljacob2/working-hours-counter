@@ -334,6 +334,31 @@
     return { donors, recipients }
   })()
 
+  // Adjusted rebalMap where recipient targets are capped to what donors can actually deliver.
+  // Prevents phantom OT when a donor day has no trimmable home session.
+  $: effectiveRebalMap = (() => {
+    if (!rebalancing) return rebalMap
+    const maxMs = $maximumDailyHours * 3_600_000
+    // Simulate each donor to measure actually-achievable ms reduction
+    let achievable = 0
+    for (const [dk, v] of Object.entries(rebalMap)) {
+      if (v >= 0) continue
+      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      if (!dayLogs.length) continue
+      const netMs = computeNetMs(dayLogs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
+      achievable += Math.abs(sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0)
+    }
+    // Cap each recipient to at most what donors can actually deliver
+    const m = { ...rebalMap }
+    let rem = achievable
+    for (const [dk, v] of Object.entries(m).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])) {
+      m[dk] = Math.min(v, rem)
+      rem = Math.max(0, rem - m[dk])
+    }
+    return m
+  })()
+
   // Returns the net ms change in worked hours that a suggestion would produce
   function simulateSuggestionDeltaMs(dayLogs, sugg) {
     if (!sugg) return 0
@@ -359,7 +384,7 @@
       const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, $commuteGapMinutes, netMs)
       const delta = sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0
       const dayCell = calDays.find(c => c?.key === dk)
       const currentOt = dayCell?.otMs ?? 0
@@ -583,7 +608,7 @@
 
   // Per-day log adjustment suggestion (thin reactive wrapper)
   $: logAdjustmentSuggestion = showRebalancing && $selectedDayLogs.length > 0
-    ? computeDaySuggestion([...$selectedDayLogs].sort(byTs), $selectedDate, rebalancing, rebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
+    ? computeDaySuggestion([...$selectedDayLogs].sort(byTs), $selectedDate, rebalancing, effectiveRebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
     : null
 
   // Unified sorted table rows: existing logs interleaved with suggestion rows
@@ -732,7 +757,7 @@
       const dayLogs = currentLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, commuteGapMins, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, commuteGapMins, netMs)
       if (!sugg) continue
 
       const base = { platform: 'home', date_key: dk }
