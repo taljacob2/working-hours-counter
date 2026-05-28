@@ -153,6 +153,8 @@ label { font-size: 0.875rem; font-weight: 500; color: var(--color-text-muted); d
 .pill-ot-neg   { background: var(--color-ot-neg-subtle);  color: var(--color-ot-neg); }
 .pill-excess-ot { background: color-mix(in srgb, hsl(270 70% 60%) 15%, transparent); color: hsl(270 60% 55%); }
 [data-theme="dark"] .pill-excess-ot { color: hsl(270 70% 75%); }
+.pill-warn { background: color-mix(in srgb, hsl(38 90% 50%) 15%, transparent); color: hsl(38 80% 40%); }
+[data-theme="dark"] .pill-warn { color: hsl(38 90% 65%); }
 .pill-live    { background: var(--color-live-subtle);    color: var(--color-live); }
 .pill-office  { background: var(--color-office-subtle);  color: var(--color-office); }
 .pill-home    { background: var(--color-home-subtle);    color: var(--color-home); }

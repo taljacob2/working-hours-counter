@@ -357,14 +357,13 @@
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
       const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
-      if (!sugg) continue
-      const delta = simulateSuggestionDeltaMs(dayLogs, sugg)
-      if (delta === 0) continue
+      const delta = sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0
       const dayCell = calDays.find(c => c?.key === dk)
       const currentOt = dayCell?.otMs ?? 0
       const isDonor    = (rebalMap[dk] ?? 0) < 0
       const isExcessOt = !isDonor && (rebalancing.excessOtRecipients?.has(dk) ?? false)
-      breakdown.push({ dk, isDonor, isExcessOt, currentOt, projectedOt: currentOt + delta, delta })
+      const noSuggestion = !sugg || delta === 0
+      breakdown.push({ dk, isDonor, isExcessOt, currentOt, projectedOt: currentOt + delta, delta, noSuggestion })
       totalDelta += delta
     }
     if (!breakdown.length) return null
@@ -1004,6 +1003,8 @@
                         <td>
                           {#if row.isDonor && rebalancing.stillAboveMax.includes(row.dk)}
                             <span class="pill pill-ot-neg" style="font-size:0.68rem;">Hours trimmed (over {$maximumDailyHours}h)</span>
+                          {:else if row.isDonor && row.noSuggestion}
+                            <span class="pill pill-warn" style="font-size:0.68rem;">OT donated — no home logs to trim</span>
                           {:else if row.isDonor}
                             <span class="pill pill-ot-neg" style="font-size:0.68rem;">OT donated</span>
                           {:else if row.isExcessOt}
@@ -1013,8 +1014,8 @@
                           {/if}
                         </td>
                         <td style="color:{row.currentOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.currentOt,true)}</td>
-                        <td style="color:{row.projectedOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.projectedOt,true)}</td>
-                        <td style="color:{row.delta<0?'var(--color-ot-neg)':'var(--color-ot-pos)'}; font-weight:700;">{fmtDuration(row.delta,true)}</td>
+                        <td style="color:{row.projectedOt<0?'var(--color-ot-neg)':'var(--color-ot-pos)'};">{fmtDuration(row.noSuggestion ? row.currentOt : row.projectedOt,true)}</td>
+                        <td style="color:{row.delta<0?'var(--color-ot-neg)':'var(--color-ot-pos)'}; font-weight:700;">{row.noSuggestion ? '—' : fmtDuration(row.delta,true)}</td>
                       </tr>
                     {/each}
                   </tbody>
