@@ -93,9 +93,12 @@
   // ── Export ───────────────────────────────────────────────────
   const currentYear  = new Date().getFullYear()
   const currentMonth = new Date().getMonth() + 1
-  let expYear  = currentYear
-  let expMonth = currentMonth
-  let expCount = null
+  let expYear     = currentYear
+  let expMonth    = currentMonth
+  let expPlatform = 'all'   // 'all' | 'home' | 'office'
+  let expCompact  = false
+  let expHebrew   = false
+  let expCount    = null
 
   const years  = Array.from({ length: 5 }, (_, i) => currentYear - i)
   const months = [
@@ -106,34 +109,52 @@
 
   $: {
     const { start, end } = monthBounds(expYear, expMonth)
-    expCount = $logs.filter(l => l.date_key >= start && l.date_key <= end).length
+    expCount = $logs.filter(l =>
+      l.date_key >= start && l.date_key <= end &&
+      (expPlatform === 'all' || l.platform === expPlatform)
+    ).length
+  }
+
+  function _expSubset() {
+    const { start, end } = monthBounds(expYear, expMonth)
+    return $logs.filter(l =>
+      l.date_key >= start && l.date_key <= end &&
+      (expPlatform === 'all' || l.platform === expPlatform)
+    )
+  }
+
+  function _expFileStem() {
+    const mo = `${expYear}-${String(expMonth).padStart(2,'0')}`
+    const platSuffix    = expPlatform !== 'all' ? `-${expPlatform}` : ''
+    const compactSuffix = expCompact  ? '-compact' : ''
+    const heSuffix      = expHebrew   ? '-he' : ''
+    return `work-logs-${mo}${platSuffix}${compactSuffix}${heSuffix}`
   }
 
   function doExport() {
-    const { start, end } = monthBounds(expYear, expMonth)
-    const subset = $logs.filter(l => l.date_key >= start && l.date_key <= end)
+    const subset = _expSubset()
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
-    exportCsv(subset, `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.csv`, use24Local)
+    exportCsv(subset, `${_expFileStem()}.csv`, use24Local, expCompact, expHebrew)
     showToast(`Exported ${subset.length} records`, 'success')
   }
 
   function doExportJson() {
-    const { start, end } = monthBounds(expYear, expMonth)
-    const subset = $logs.filter(l => l.date_key >= start && l.date_key <= end)
+    const subset = _expSubset()
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
+    const { start, end } = monthBounds(expYear, expMonth)
     const monthDayOverrides = Object.fromEntries(
       Object.entries($dayOverrides).filter(([dk]) => dk >= start && dk <= end)
     )
-    const fileName = `work-logs-${expYear}-${String(expMonth).padStart(2,'0')}.json`
     const payload = {
       exported_at: new Date().toISOString(),
       month: `${expYear}-${String(expMonth).padStart(2,'0')}`,
+      ...(expPlatform !== 'all' ? { platform_filter: expPlatform } : {}),
       day_schedule: monthDayOverrides,
       logs: subset,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = fileName; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `${_expFileStem()}.json`; a.click()
     URL.revokeObjectURL(url)
     showToast(`Exported ${subset.length} records as JSON`, 'success')
   }
@@ -554,6 +575,24 @@
       <select bind:value={expMonth}>
         {#each months as [v, label]}<option value={v}>{label}</option>{/each}
       </select>
+    </div>
+    <div style="margin-top: 0.6rem; display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
+      {#each [['all','All platforms'],['home','Home only'],['office','Office only']] as [val, lbl]}
+        <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer; font-size: 0.875rem;">
+          <input type="radio" bind:group={expPlatform} value={val} />
+          {lbl}
+        </label>
+      {/each}
+      <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer; font-size: 0.875rem; margin-left: auto;">
+        <input type="checkbox" bind:checked={expCompact} />
+        Compact (CSV only)
+      </label>
+      <label style="display: flex; gap: 0.35rem; font-weight: normal; cursor: pointer; font-size: 0.875rem;">
+        <input type="checkbox" bind:checked={expHebrew} />
+        עברית (CSV only)
+      </label>
+    </div>
+    <div class="export-row">
       <button class="btn btn-primary" on:click={doExport} disabled={expCount === 0}>
         ⬇ Export CSV
       </button>
