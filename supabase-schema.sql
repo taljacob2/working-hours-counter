@@ -47,7 +47,31 @@ create policy "Auth users full access"
 
 -- ============================================================
 
--- 3. Explicit permissions (fixes "permission denied" errors)
+-- 3. Rebalance history table
+create table public.rebalance_history (
+  id          uuid        primary key default gen_random_uuid(),
+  user_id     uuid        not null references auth.users(id),
+  month_key   text        not null,   -- 'YYYY-MM'
+  applied_at  timestamptz not null default now(),
+  delta       jsonb       not null,   -- { inserted_ids, updated, deleted_logs }
+  summary     jsonb       not null    -- { updates, inserts, deletes, otBefore, otAfter, dateKeys }
+);
+
+alter table public.rebalance_history enable row level security;
+
+create policy "own rows only"
+  on public.rebalance_history
+  for all
+  using  (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+create index rebalance_history_user_month_idx
+  on public.rebalance_history (user_id, month_key, applied_at);
+
+-- ============================================================
+
+-- 4. Explicit permissions (fixes "permission denied" errors)
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on table public.work_logs to anon, authenticated;
 grant select, insert, update, delete on table public.work_settings to anon, authenticated;
+grant select, insert, update, delete on table public.rebalance_history to anon, authenticated;
