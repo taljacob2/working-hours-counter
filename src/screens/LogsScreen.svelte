@@ -190,12 +190,15 @@
       .filter(c => c !== null && c.count > 0)
       .map(c => ({ key: c.key, currentMs: c.netMs, offMs: c.offMs, isOff: dayIsOff(c.key) }))
 
+    // Days that have at least one home-platform log — only these can be trimmed as donors
+    const daysWithHomeLogs = new Set(logs.filter(l => l.platform === 'home').map(l => l.date_key))
+
     const transfers = []
 
     // Pass 1: off-day home hours → working days.
     // Priority 1: fill under-required days first. Priority 2: fill under-max days.
     // Off days go first so their surplus is never crowded out by working-day OT donors.
-    for (const donor of days.filter(d => d.isOff && d.currentMs > d.offMs).sort((a, b) => b.currentMs - a.currentMs)) {
+    for (const donor of days.filter(d => d.isOff && d.currentMs > d.offMs && daysWithHomeLogs.has(d.key)).sort((a, b) => b.currentMs - a.currentMs)) {
       const floor = donor.offMs
       while (donor.currentMs > floor) {
         const underReq = days
@@ -224,10 +227,10 @@
     for (const rec of recipients) {
       while (rec.currentMs < reqMs) {
         const aboveMaxDonors = days
-          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > maxMs)
+          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > maxMs && daysWithHomeLogs.has(d.key))
           .sort((a, b) => b.currentMs - a.currentMs)
         const otDonors = days
-          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > reqMs && d.currentMs <= maxMs)
+          .filter(d => !d.tappedOut && !d.isOff && d.currentMs > reqMs && d.currentMs <= maxMs && daysWithHomeLogs.has(d.key))
           .sort((a, b) => b.currentMs - a.currentMs)
 
         const donor = aboveMaxDonors[0] || otDonors[0]
@@ -263,7 +266,7 @@
       let given = 0
       while (given < maxForRec) {
         const donor = days
-          .filter(d => !d.isOff && !d.tappedOut3 && d.currentMs > maxMs)
+          .filter(d => !d.isOff && !d.tappedOut3 && d.currentMs > maxMs && daysWithHomeLogs.has(d.key))
           .sort((a, b) => b.currentMs - a.currentMs)[0]
         if (!donor) break
         const floor    = Math.max(maxMs, donor.offMs)
