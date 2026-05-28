@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, rebalHistoryCap } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -23,9 +23,26 @@
   $: calYear  = $calCursor.getFullYear()
   $: calMonth = $calCursor.getMonth() + 1
 
-  $: calDays = buildCalendar(calYear, calMonth, $logs, $offDays, $dayOverrides, $requiredHours, $minimumDailyHours, $maximumDailyHours, now)
-  $: cumOt   = monthCumulativeOtMs($logs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
-  $: daysLogged = loggedDaysInMonth($logs, calYear, calMonth).length
+  // Historical log simulation for view mode: undo rebalances from newest down to targetIdx
+  function computeHistoricalLogs(currentLogs, history, targetIdx) {
+    let simLogs = [...currentLogs]
+    for (let i = history.length - 1; i >= targetIdx; i--) {
+      const { inserted_ids, updated, deleted_logs } = history[i].delta
+      simLogs = simLogs.filter(l => !inserted_ids.includes(l.id))
+      for (const u of updated)
+        simLogs = simLogs.map(l => l.id === u.id ? { ...l, timestamp: u.old_timestamp, date_key: u.old_date_key } : l)
+      simLogs = [...simLogs, ...deleted_logs]
+    }
+    return simLogs
+  }
+
+  $: effectiveLogs = viewingEntryIdx === null
+    ? $logs
+    : computeHistoricalLogs($logs, monthHistory, viewingEntryIdx)
+
+  $: calDays = buildCalendar(calYear, calMonth, effectiveLogs, $offDays, $dayOverrides, $requiredHours, $minimumDailyHours, $maximumDailyHours, now)
+  $: cumOt   = monthCumulativeOtMs(effectiveLogs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
+  $: daysLogged = loggedDaysInMonth(effectiveLogs, calYear, calMonth).length
 
   function buildCalendar(year, month, logsArr, offDaysArr, dayOverridesObj, reqHours, minHours, maxHours, currentTime) {
     const first = new Date(year, month - 1, 1)
@@ -147,9 +164,14 @@
   }
 
   // ── Selected day metrics ─────────────────────────────────────
-  $: selNetMs    = computeNetMs($selectedDayLogs, $selectedDate === todayKey ? now : null)
+  // In view mode use the simulated logs for the selected day; otherwise use the live store
+  $: viewDayLogs = viewingEntryIdx === null
+    ? $selectedDayLogs
+    : effectiveLogs.filter(l => l.date_key === $selectedDate).sort(byTs)
+
+  $: selNetMs    = computeNetMs(viewDayLogs, ($selectedDate === todayKey && viewingEntryIdx === null) ? now : null)
   $: selDayIsOff = isOffDay($selectedDate, $offDays, $dayOverrides)
-  $: selOtMs     = $selectedDayLogs.length > 0 ? (selDayIsOff ? selNetMs : selNetMs - $requiredHours * 3_600_000) : null
+  $: selOtMs     = viewDayLogs.length > 0 ? (selDayIsOff ? selNetMs : selNetMs - $requiredHours * 3_600_000) : null
 
   // ── Format helpers ───────────────────────────────────────────
   function fmtTs(ts) {
@@ -164,6 +186,10 @@
 
   // ── Rebalancing ──────────────────────────────────────────────
   let showRebalancing = false
+  let monthHistory = []
+  let historyLoading = false
+  let viewingEntryIdx = null  // null = current, 0 = before any rebalance, N = after N rebalances
+  let _histMonthKey = null    // last month key for which history was loaded
 
   function fmtKeyShort(key) {
     return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
@@ -311,7 +337,7 @@
     return { transfers, stillUnderMin, stillAboveMax, noViolations, excessOtRecipients }
   }
 
-  $: rebalancing = showRebalancing
+  $: rebalancing = (showRebalancing && viewingEntryIdx === null)
     ? suggestRebalancing(
         calDays.filter(Boolean),
         $minimumDailyHours * 3_600_000,
@@ -319,7 +345,7 @@
         $requiredHours    * 3_600_000,
         $offDays,
         $dayOverrides,
-        $logs,
+        effectiveLogs,
         $commuteGapMinutes
       )
     : null
@@ -362,7 +388,7 @@
     let achievable = 0
     for (const [dk, v] of Object.entries(rebalMap)) {
       if (v >= 0) continue
-      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
       const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
@@ -400,7 +426,7 @@
     const breakdown = []
     let totalDelta = 0
     for (const dk of [...affectedKeys]) {
-      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
       const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, $commuteGapMinutes, netMs)
@@ -625,9 +651,9 @@
     return { logId: last.id, originalTs: last.timestamp, newTs: new Date(new Date(last.timestamp).getTime() + adj).toISOString(), deltaMs: adj, isPartial: false }
   }
 
-  // Per-day log adjustment suggestion (thin reactive wrapper)
-  $: logAdjustmentSuggestion = showRebalancing && $selectedDayLogs.length > 0
-    ? computeDaySuggestion([...$selectedDayLogs].sort(byTs), $selectedDate, rebalancing, effectiveRebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
+  // Per-day log adjustment suggestion (thin reactive wrapper) — disabled in view mode
+  $: logAdjustmentSuggestion = (showRebalancing && viewingEntryIdx === null && viewDayLogs.length > 0)
+    ? computeDaySuggestion([...viewDayLogs].sort(byTs), $selectedDate, rebalancing, effectiveRebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
     : null
 
   // Unified sorted table rows: existing logs interleaved with suggestion rows
@@ -649,7 +675,7 @@
     }
 
     // Existing log rows
-    for (const log of [...$selectedDayLogs].sort(byTs)) {
+    for (const log of [...viewDayLogs].sort(byTs)) {
       rows.push({
         kind:          'log',
         log,
@@ -746,31 +772,45 @@
     showToast('Session deleted', 'success')
   }
 
-  // ── Apply All / Revert All ───────────────────────────────────
-  let hasSnapshot = !!localStorage.getItem('whl_rebal_snapshot')
+  // ── Rebalance history (Supabase-backed, per month) ──────────
+  async function loadMonthHistory() {
+    const mk = `${calYear}-${String(calMonth).padStart(2, '0')}`
+    if (_histMonthKey === mk) return
+    _histMonthKey = mk
+    viewingEntryIdx = null
+    historyLoading = true
+    const sb = getSupabase()
+    const { data, error } = await sb
+      .from('rebalance_history')
+      .select('*')
+      .eq('user_id', $user.id)
+      .eq('month_key', mk)
+      .order('applied_at', { ascending: true })
+    historyLoading = false
+    if (error) { showToast('Failed to load rebalance history', 'error'); return }
+    monthHistory = data || []
+  }
+
+  // Load/reload history when the panel opens or the month changes while it's open
+  $: if (showRebalancing) {
+    const _mk = `${calYear}-${String(calMonth).padStart(2, '0')}`
+    if (_histMonthKey !== _mk) loadMonthHistory()
+  }
 
   async function applyAllRebalance() {
-    if (!rebalancing || !showRebalancing) return
+    if (!rebalancing || !showRebalancing || viewingEntryIdx !== null) return
     const maxMs = $maximumDailyHours * 3_600_000
     const commuteGapMins = $commuteGapMinutes
     const otBefore = cumOt
 
-    // Snapshot affected logs before touching anything
     const affectedKeys = new Set([...Object.keys(rebalMap), ...(rebalancing.stillAboveMax || [])])
-    const snapshot = {
-      savedAt: new Date().toISOString(),
-      month: `${calYear}-${String(calMonth).padStart(2, '0')}`,
-      dateKeys: [...affectedKeys],
-      logs: $logs.filter(l => affectedKeys.has(l.date_key))
-    }
-    localStorage.setItem('whl_rebal_snapshot', JSON.stringify(snapshot))
-    hasSnapshot = true
+    const currentLogs = $logs  // freeze for suggestion computation
 
-    // Compute suggestion for every affected day and collect DB ops
-    const currentLogs = $logs  // freeze current state for suggestion computation
-    const updates = []   // { logId, newTs }
-    const inserts = []   // raw log payloads
-    const deletes = []   // log IDs
+    const updates = []          // { logId, newTs }
+    const inserts = []          // raw log payloads
+    const deletes = []          // log IDs to delete
+    const deltaUpdated = []     // { id, old_timestamp, old_date_key }
+    const deltaDeletedLogs = [] // full log objects that will be deleted
 
     for (const dk of [...affectedKeys]) {
       const dayLogs = currentLogs.filter(l => l.date_key === dk).sort(byTs)
@@ -782,6 +822,7 @@
       const base = { platform: 'home', date_key: dk }
       if (sugg.type === 'delete_session') {
         deletes.push(sugg.resumeLogId, sugg.pauseLogId)
+        deltaDeletedLogs.push(...currentLogs.filter(l => l.id === sugg.resumeLogId || l.id === sugg.pauseLogId))
       } else if (sugg.type === 'create_blocks') {
         for (const block of sugg.blocks) {
           if (block.kind === 'new_block') {
@@ -789,6 +830,8 @@
             inserts.push({ ...base, id: crypto.randomUUID(), action: 'pause',  timestamp: block.pauseTs  })
           } else if (block.kind === 'extend_resume') {
             updates.push({ logId: block.logId, newTs: block.newTs })
+            const old = currentLogs.find(l => l.id === block.logId)
+            if (old) deltaUpdated.push({ id: block.logId, old_timestamp: old.timestamp, old_date_key: old.date_key })
           }
         }
       } else if (sugg.type === 'create_block_logs') {
@@ -798,6 +841,8 @@
         inserts.push({ ...base, id: crypto.randomUUID(), action: sugg.action, timestamp: sugg.newTs })
       } else if (sugg.logId) {
         updates.push({ logId: sugg.logId, newTs: sugg.newTs })
+        const old = currentLogs.find(l => l.id === sugg.logId)
+        if (old) deltaUpdated.push({ id: sugg.logId, old_timestamp: old.timestamp, old_date_key: old.date_key })
       }
     }
 
@@ -827,8 +872,35 @@
     newLogs = [...newLogs, ...insertedRows]
     logs.set(newLogs)
 
-    isSaving = false
     const otAfter = monthCumulativeOtMs(newLogs, calYear, calMonth, $requiredHours, $offDays, $dayOverrides)
+
+    // Save history entry to Supabase
+    const monthKey = `${calYear}-${String(calMonth).padStart(2, '0')}`
+    const delta = {
+      inserted_ids: insertedRows.map(r => r.id),
+      updated: deltaUpdated,
+      deleted_logs: deltaDeletedLogs
+    }
+    const summary = {
+      updates: updates.length, inserts: inserts.length, deletes: deletes.length,
+      otBefore, otAfter, dateKeys: [...affectedKeys]
+    }
+    const { data: histData, error: histErr } = await sb
+      .from('rebalance_history')
+      .insert({ user_id: $user.id, month_key: monthKey, delta, summary })
+      .select().single()
+    if (!histErr && histData) {
+      let newHistory = [...monthHistory, histData]
+      const cap = $rebalHistoryCap
+      if (cap > 0 && newHistory.length > cap) {
+        const toPrune = newHistory.slice(0, newHistory.length - cap)
+        await sb.from('rebalance_history').delete().in('id', toPrune.map(e => e.id))
+        newHistory = newHistory.slice(-cap)
+      }
+      monthHistory = newHistory
+    }
+
+    isSaving = false
     const otDelta = otAfter - otBefore
     const parts = []
     if (updates.length)  parts.push(`${updates.length} edited`)
@@ -840,24 +912,40 @@
     showToast(`Rebalancing applied (${parts.join(', ')})${otChange}`, 'success')
   }
 
-  async function revertAllRebalance() {
-    const stored = localStorage.getItem('whl_rebal_snapshot')
-    if (!stored) { showToast('No snapshot to revert to', 'info'); return }
-    const { dateKeys, logs: snapshotLogs } = JSON.parse(stored)
+  async function revertLatestRebalance() {
+    const entry = monthHistory.at(-1)
+    if (!entry) return
+    const { inserted_ids, updated, deleted_logs } = entry.delta
 
     isSaving = true
     const sb = getSupabase()
-    // Delete all current logs for affected date_keys then restore snapshot
-    const { error: delErr } = await sb.from('work_logs').delete().in('date_key', dateKeys)
-    if (delErr) { showToast('Revert failed: ' + delErr.message, 'error'); isSaving = false; return }
-    const { data, error: insErr } = await sb.from('work_logs').insert(snapshotLogs).select()
-    if (insErr) { showToast('Revert failed: ' + insErr.message, 'error'); isSaving = false; return }
 
-    logs.update(ls => [...ls.filter(l => !dateKeys.includes(l.date_key)), ...(data || snapshotLogs)])
-    localStorage.removeItem('whl_rebal_snapshot')
-    hasSnapshot = false
+    if (inserted_ids.length) {
+      const { error } = await sb.from('work_logs').delete().in('id', inserted_ids)
+      if (error) { showToast('Revert failed: ' + error.message, 'error'); isSaving = false; return }
+    }
+    for (const u of updated) {
+      const { error } = await sb.from('work_logs').update({ timestamp: u.old_timestamp, date_key: u.old_date_key }).eq('id', u.id)
+      if (error) { showToast('Revert failed: ' + error.message, 'error'); isSaving = false; return }
+    }
+    if (deleted_logs.length) {
+      const { error } = await sb.from('work_logs').insert(deleted_logs)
+      if (error) { showToast('Revert failed: ' + error.message, 'error'); isSaving = false; return }
+    }
+
+    const { error: delHistErr } = await sb.from('rebalance_history').delete().eq('id', entry.id)
+    if (delHistErr) { showToast('Revert failed: ' + delHistErr.message, 'error'); isSaving = false; return }
+
+    let newLogs = $logs.filter(l => !inserted_ids.includes(l.id))
+    for (const u of updated)
+      newLogs = newLogs.map(l => l.id === u.id ? { ...l, timestamp: u.old_timestamp, date_key: u.old_date_key } : l)
+    newLogs = [...newLogs, ...deleted_logs]
+    logs.set(newLogs)
+
+    monthHistory = monthHistory.slice(0, -1)
+    if (viewingEntryIdx !== null && viewingEntryIdx > monthHistory.length) viewingEntryIdx = null
     isSaving = false
-    showToast('Rebalancing reverted to snapshot', 'success')
+    showToast('Rebalancing reverted', 'success')
   }
 
   async function applySuggestion() {
@@ -882,6 +970,14 @@
 <div class="logs-screen">
   <!-- LEFT: Calendar -->
   <aside class="cal-panel">
+
+    {#if viewingEntryIdx !== null}
+      <div class="view-mode-banner">
+        <span>👁 {viewingEntryIdx === 0 ? 'Original state' : `After rebalance ${viewingEntryIdx} of ${monthHistory.length}`}</span>
+        <button class="btn btn-sm btn-secondary" on:click={() => viewingEntryIdx = null}>✕ Exit</button>
+      </div>
+    {/if}
+
     <div class="cal-nav">
       <button class="btn btn-secondary btn-sm" on:click={prevMonth}>‹</button>
       <div class="cal-title">
@@ -986,35 +1082,47 @@
       {/each}
     </div>
 
-    {#if showRebalancing && rebalancing}
+    {#if showRebalancing && (rebalancing || viewingEntryIdx !== null || monthHistory.length > 0)}
       <div class="rebal-panel">
 
         <!-- Header -->
         <div class="rebal-hd" style="flex-direction: column; align-items: flex-start; gap: 0.5rem;">
           <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
             <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <span class="rebal-hd-icon">&#9878;</span>
-              <p class="rebal-hd-title" style="margin: 0; font-size: 1.1rem; font-weight: 600;">Hour Redistribution Plan</p>
+              <span class="rebal-hd-icon">{viewingEntryIdx !== null ? '👁' : '⚖'}</span>
+              <p class="rebal-hd-title" style="margin: 0; font-size: 1.1rem; font-weight: 600;">
+                {#if viewingEntryIdx !== null}
+                  {viewingEntryIdx === 0 ? 'Viewing: Original State' : `Viewing: After Rebalance ${viewingEntryIdx} of ${monthHistory.length}`}
+                {:else}
+                  Hour Redistribution Plan
+                {/if}
+              </p>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-              {#if rebalancing.noViolations}
-                <span class="badge badge-success">Balanced</span>
-              {:else}
-                <span class="badge badge-warning">Action Required</span>
-              {/if}
-              {#if rebalancing.transfers.length}
-                <button class="btn btn-sm btn-primary" style="font-size: 0.75rem;" on:click={applyAllRebalance} disabled={isSaving}>
-                  ⚡ Apply All
+              {#if viewingEntryIdx !== null}
+                <button class="btn btn-sm btn-secondary" style="font-size: 0.75rem;" on:click={() => viewingEntryIdx = null}>
+                  ✕ Exit View
                 </button>
-              {/if}
-              {#if hasSnapshot}
-                <button class="btn btn-sm btn-secondary" style="font-size: 0.75rem;" on:click={revertAllRebalance} disabled={isSaving}>
-                  ↩ Revert
-                </button>
+              {:else if rebalancing}
+                {#if rebalancing.noViolations}
+                  <span class="badge badge-success">Balanced</span>
+                {:else}
+                  <span class="badge badge-warning">Action Required</span>
+                {/if}
+                {#if rebalancing.transfers.length}
+                  <button class="btn btn-sm btn-primary" style="font-size: 0.75rem;" on:click={applyAllRebalance} disabled={isSaving}>
+                    ⚡ Apply All
+                  </button>
+                {/if}
+                {#if monthHistory.length > 0}
+                  <button class="btn btn-sm btn-secondary" style="font-size: 0.75rem;" on:click={revertLatestRebalance} disabled={isSaving}>
+                    ↩ Revert
+                  </button>
+                {/if}
               {/if}
             </div>
           </div>
-          {#if !rebalancing.noViolations}
+          {#if rebalancing && !rebalancing.noViolations}
             <div class="rebal-violations">
               {#if rebalancing.stillAboveMax.length}
                 <span class="rebal-violation-item rebal-violation--max">⚠ Still above {$maximumDailyHours}h: {rebalancing.stillAboveMax.map(fmtKeyShort).join(', ')}</span>
@@ -1024,6 +1132,7 @@
               {/if}
             </div>
           {/if}
+          {#if rebalancing}
           <div class="ot-projection-box">
             <div class="ot-proj-row">
               <div class="ot-proj-col">
@@ -1089,14 +1198,15 @@
             {/if}
           </div>
           <p class="rebal-hd-hint" style="margin: 0; font-size: 0.85rem;">Click any day below to view &amp; edit its logs &rarr;</p>
+          {/if}
         </div>
 
-        {#if !rebalancing.transfers.length}
+        {#if rebalancing && !rebalancing.transfers.length}
           <div class="rebal-clean">
             <span class="rebal-clean-icon">&#10003;</span>
             <p>All logged days are already within {$minimumDailyHours}h–{$maximumDailyHours}h. Nothing to adjust.</p>
           </div>
-        {:else}
+        {:else if rebalancing}
 
           <!-- Donors -->
           {#if rebalSummary.donors.length}
@@ -1175,6 +1285,51 @@
           {/if}
 
         {/if}
+
+        <!-- Rebalance history -->
+        {#if historyLoading}
+          <p class="rebal-history-loading">Loading history…</p>
+        {:else if monthHistory.length > 0}
+          <div class="rebal-history">
+            <p class="rebal-section-lbl" style="margin-bottom: 0.5rem;">↩ Applied this month ({monthHistory.length})</p>
+
+            <!-- Original state row -->
+            <div class="rebal-history-row">
+              <div class="rebal-history-meta">
+                <span class="rebal-history-label">Original (before any rebalance)</span>
+              </div>
+              <button class="btn btn-sm {viewingEntryIdx === 0 ? 'btn-primary' : 'btn-secondary'}"
+                on:click={() => viewingEntryIdx = viewingEntryIdx === 0 ? null : 0}>
+                {viewingEntryIdx === 0 ? '👁 Viewing' : 'View'}
+              </button>
+            </div>
+
+            {#each monthHistory as entry, i}
+              <div class="rebal-history-row {i === monthHistory.length - 1 ? 'rebal-history-row--latest' : ''}">
+                <div class="rebal-history-meta">
+                  <span class="rebal-history-label">Rebalance {i + 1}</span>
+                  <span class="rebal-history-ts">{new Date(entry.applied_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span class="rebal-history-summary">
+                    {[entry.summary.updates && `${entry.summary.updates}e`, entry.summary.inserts && `${entry.summary.inserts}a`, entry.summary.deletes && `${entry.summary.deletes}d`].filter(Boolean).join(' ')}
+                    · OT {fmtDuration(entry.summary.otBefore, true)} → {fmtDuration(entry.summary.otAfter, true)}
+                  </span>
+                </div>
+                <div class="rebal-history-actions">
+                  <button class="btn btn-sm {viewingEntryIdx === i + 1 ? 'btn-primary' : 'btn-secondary'}"
+                    on:click={() => viewingEntryIdx = viewingEntryIdx === i + 1 ? null : i + 1}>
+                    {viewingEntryIdx === i + 1 ? '👁 Viewing' : 'View'}
+                  </button>
+                  {#if i === monthHistory.length - 1 && viewingEntryIdx === null}
+                    <button class="btn btn-sm btn-danger" on:click={revertLatestRebalance} disabled={isSaving}>
+                      ↩ Revert
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
       </div>
     {/if}
   </aside>
@@ -1188,12 +1343,16 @@
         {#if selOtMs !== null}
           <span class="pill {selOtMs >= 0 ? 'pill-ot-pos' : 'pill-ot-neg'} tabnum">{fmtDuration(selOtMs, true)} OT</span>
         {/if}
-        <span class="pill pill-muted">{$selectedDayLogs.length} logs</span>
+        <span class="pill pill-muted">{viewDayLogs.length} logs</span>
         <select bind:value={$logResolution} class="res-select">
           <option value="compact">Compact</option>
           <option value="full">Full</option>
         </select>
-        <button class="btn btn-sm btn-primary" on:click={startNewLog}>+ Add Log</button>
+        {#if viewingEntryIdx === null}
+          <button class="btn btn-sm btn-primary" on:click={startNewLog}>+ Add Log</button>
+        {:else}
+          <span class="pill pill-muted">Read-only</span>
+        {/if}
       </div>
     </div>
 
@@ -1754,6 +1913,34 @@
   .rebal-footer--ok   { color: var(--color-ot-pos); background: color-mix(in srgb, var(--color-ot-pos) 6%, transparent); }
   .rebal-footer--warn { color: var(--color-ot-neg); background: color-mix(in srgb, var(--color-ot-neg) 6%, transparent); }
   .rebal-footer-detail { font-size: 0.72rem; margin-top: 2px; opacity: 0.85; }
+
+  /* View mode banner */
+  .view-mode-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.4rem 0.75rem;
+    background: var(--color-primary-subtle);
+    border: 1.5px solid var(--color-primary);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem; font-weight: 600; color: var(--color-primary);
+    margin-bottom: 0.5rem;
+  }
+
+  /* Rebalance history section */
+  .rebal-history { border-top: 1px solid var(--color-border); padding: 0.75rem 0.875rem 0.5rem; }
+  .rebal-history-loading { font-size: 0.78rem; color: var(--color-text-muted); padding: 0.5rem 0.875rem; }
+  .rebal-history-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.78rem;
+  }
+  .rebal-history-row:last-child { border-bottom: none; }
+  .rebal-history-row--latest { background: color-mix(in srgb, var(--color-primary) 4%, transparent); border-radius: var(--radius-sm); padding: 0.35rem 0.4rem; }
+  .rebal-history-meta { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+  .rebal-history-label { font-weight: 600; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rebal-history-ts { font-size: 0.72rem; color: var(--color-text-muted); }
+  .rebal-history-summary { font-size: 0.72rem; color: var(--color-text-muted); }
+  .rebal-history-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
 
   /* Day type row */
   .day-type-row {

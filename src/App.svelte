@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -152,6 +152,9 @@
       const autoTrackVal = settings?.find(s => s.key === 'autoTrackEnabled')?.value
       const autoTrackLocal = localStorage.getItem('whl_auto_track')
       autoTrackEnabled.set((autoTrackVal ?? autoTrackLocal) === 'true')
+
+      const rebalCapVal = settings?.find(s => s.key === 'rebalHistoryCap')?.value
+      rebalHistoryCap.set(parseInt(rebalCapVal ?? localStorage.getItem('whl_rebal_history_cap') ?? '0', 10))
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

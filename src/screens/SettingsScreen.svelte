@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -16,6 +16,9 @@
 
   let commuteGapLocal = 45
   commuteGapMinutes.subscribe(v => commuteGapLocal = v)
+
+  let rebalHistoryCapLocal = 0
+  rebalHistoryCap.subscribe(v => rebalHistoryCapLocal = v)
 
   let use24Local = true
   use24HourFormat.subscribe(v => use24Local = v)
@@ -58,6 +61,9 @@
     commuteGapMinutes.set(commuteGapLocal)
     localStorage.setItem('whl_commute_gap', String(commuteGapLocal))
 
+    rebalHistoryCap.set(rebalHistoryCapLocal)
+    localStorage.setItem('whl_rebal_history_cap', String(rebalHistoryCapLocal))
+
     // If the off-days configuration changed, clear all per-date overrides — they were
     // set relative to the old config and would silently shadow the new one.
     const offDaysChanged = [...$offDays].sort().join(',') !== [...offDaysLocal].sort().join(',')
@@ -76,6 +82,7 @@
       { key: 'commuteGapMinutes', value: String(commuteGapLocal) },
       { key: 'use24HourFormat', value: String(use24Local) },
       { key: 'offDays', value: JSON.stringify(offDaysLocal) },
+      { key: 'rebalHistoryCap', value: String(rebalHistoryCapLocal) },
     ]
     if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
     const { error } = await sb.from('work_settings').upsert(upsertRows)
@@ -509,6 +516,21 @@
       </div>
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
         Hours logged on off days count as pure overtime (no required-hours deduction). Off days are shown with a muted background in the calendar and are excluded as recipients during rebalancing — their surplus hours can be redistributed to working days.
+      </p>
+    </div>
+
+    <div style="margin-top: 1.5rem">
+      <label>Rebalance History Limit</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input type="number" min="0" max="100" step="1"
+          bind:value={rebalHistoryCapLocal}
+          on:input={e => rebalHistoryCapLocal = Math.max(0, parseInt(e.target.value) || 0)}
+          style="width:80px"
+        />
+        <span class="hours-label">{rebalHistoryCapLocal === 0 ? 'unlimited' : 'entries / month'}</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        How many applied rebalances to remember per month. Set to 0 for unlimited. Older entries are pruned automatically when the limit is exceeded.
       </p>
     </div>
 
