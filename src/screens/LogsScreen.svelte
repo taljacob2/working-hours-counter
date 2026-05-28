@@ -892,7 +892,7 @@
           <button 
             class="pill {filterUnderMin ? 'pill-ot-neg' : 'pill-muted'}" 
             style="cursor: pointer; border: 1.5px solid transparent;" 
-            class:active-filter={filterUnderMin}
+            class:active-filter-under-min={filterUnderMin}
             on:click={() => filterUnderMin = !filterUnderMin}
             title="Filter by under minimum"
           >
@@ -901,7 +901,7 @@
           <button 
             class="pill {filterAboveMax ? 'pill-ot-pos' : 'pill-muted'}" 
             style="cursor: pointer; border: 1.5px solid transparent;" 
-            class:active-filter-max={filterAboveMax}
+            class:active-filter-above-max={filterAboveMax}
             on:click={() => filterAboveMax = !filterAboveMax}
             title="Filter by above {$maximumDailyHours}h maximum"
           >
@@ -1545,10 +1545,10 @@
   .cal-cell--off-day { background: color-mix(in srgb, var(--color-text-muted) 6%, var(--color-surface-2)); }
   .cal-cell--off-day .cal-day-num { color: var(--color-text-muted); }
   .cal-cell--override { outline: 1.5px dashed var(--color-primary); outline-offset: -2px; }
-  .active-filter        { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
-  .active-filter-max    { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
-  .active-filter-open   { border-color: color-mix(in srgb, var(--color-live) 40%, transparent) !important; }
-  .active-filter-broken { border-color: color-mix(in srgb, hsl(38 90% 50%) 40%, transparent) !important; }
+  .active-filter-under-min  { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
+  .active-filter-above-max  { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
+  .active-filter-open       { border-color: color-mix(in srgb, var(--color-live) 40%, transparent) !important; }
+  .active-filter-broken     { border-color: color-mix(in srgb, hsl(38 90% 50%) 40%, transparent) !important; }
   .cal-cell--open-session   { border-bottom: 3px solid var(--color-live); }
   .cal-cell--broken-session { border-bottom: 3px solid hsl(38 90% 50%); }
   .cal-day-num { font-size: 0.9rem; font-weight: 600; }
