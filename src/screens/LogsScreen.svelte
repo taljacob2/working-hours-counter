@@ -886,59 +886,56 @@
       <button class="btn btn-secondary btn-sm" on:click={prevMonth}>‹</button>
       <div class="cal-title">
         <strong>{MONTH_NAMES[calMonth-1]} {calYear}</strong>
-        <div class="cal-month-pills">
-          <span class="pill pill-muted">{daysLogged}d logged</span>
-          <span class="pill {cumOt >= 0 ? 'pill-ot-pos' : 'pill-ot-neg'}">{fmtDuration(cumOt, true)} OT</span>
-          <button 
-            class="pill {filterUnderMin ? 'pill-ot-neg' : 'pill-muted'}" 
-            style="cursor: pointer; border: 1.5px solid transparent;" 
-            class:active-filter-under-min={filterUnderMin}
-            on:click={() => filterUnderMin = !filterUnderMin}
-            title="Filter by under minimum"
-          >
-            ⚠ Under Min
-          </button>
-          <button 
-            class="pill {filterAboveMax ? 'pill-ot-pos' : 'pill-muted'}" 
-            style="cursor: pointer; border: 1.5px solid transparent;" 
-            class:active-filter-above-max={filterAboveMax}
-            on:click={() => filterAboveMax = !filterAboveMax}
-            title="Filter by above {$maximumDailyHours}h maximum"
-          >
-            ⚠ Above Max
-          </button>
-          <button
-            class="pill {showRebalancing ? 'pill-primary' : 'pill-muted'}"
-            style="cursor: pointer; border: 1.5px solid transparent;"
-            on:click={() => showRebalancing = !showRebalancing}
-            title="Suggest how to redistribute hours to fix violations"
-          >
-            ⚖ Rebalance
-          </button>
-          <button
-            class="pill {filterOpenSession ? 'pill-live' : 'pill-muted'}"
-            style="cursor: pointer; border: 1.5px solid transparent;"
-            class:active-filter-open={filterOpenSession}
-            on:click={() => filterOpenSession = !filterOpenSession}
-            title="Filter to days with an unclosed (still-running) session"
-          >
-            ▶ Unclosed
-          </button>
-          <button
-            class="pill {filterUnopenSession ? 'pill-warn' : 'pill-muted'}"
-            style="cursor: pointer; border: 1.5px solid transparent;"
-            class:active-filter-unopen={filterUnopenSession}
-            on:click={() => filterUnopenSession = !filterUnopenSession}
-            title="Filter to days with a pause log that has no matching resume (unopen session)"
-          >
-            ⚠ Unopen
-          </button>
-        </div>
       </div>
       <div class="cal-nav-right">
         <button class="btn btn-secondary btn-sm" on:click={goToday}>Today</button>
         <button class="btn btn-secondary btn-sm" on:click={nextMonth}>›</button>
       </div>
+    </div>
+
+    <div class="cal-meta">
+      <div class="cal-stats">
+        <span class="pill pill-muted">{daysLogged}d logged</span>
+        <span class="pill {cumOt >= 0 ? 'pill-ot-pos' : 'pill-ot-neg'}">{fmtDuration(cumOt, true)} OT</span>
+      </div>
+      <button
+        class="filter-btn {showRebalancing ? 'filter-btn--rebalance' : ''}"
+        on:click={() => showRebalancing = !showRebalancing}
+        title="Suggest how to redistribute hours to fix violations"
+      >
+        ⚖ Rebalance
+      </button>
+    </div>
+
+    <div class="cal-filters">
+      <button
+        class="filter-btn {filterUnderMin ? 'filter-btn--neg' : ''}"
+        on:click={() => filterUnderMin = !filterUnderMin}
+        title="Show only days below the {$minimumDailyHours}h minimum"
+      >
+        ⚠ Under Min
+      </button>
+      <button
+        class="filter-btn {filterAboveMax ? 'filter-btn--pos' : ''}"
+        on:click={() => filterAboveMax = !filterAboveMax}
+        title="Show only days above the {$maximumDailyHours}h maximum"
+      >
+        ⚠ Above Max
+      </button>
+      <button
+        class="filter-btn {filterOpenSession ? 'filter-btn--live' : ''}"
+        on:click={() => filterOpenSession = !filterOpenSession}
+        title="Show only days with an unclosed (still-running) session"
+      >
+        ▶ Unclosed
+      </button>
+      <button
+        class="filter-btn {filterUnopenSession ? 'filter-btn--warn' : ''}"
+        on:click={() => filterUnopenSession = !filterUnopenSession}
+        title="Show only days with a pause log that has no matching resume"
+      >
+        ⚠ Unopen
+      </button>
     </div>
 
     <div class="cal-grid">
@@ -1515,15 +1512,33 @@
     .cal-cell { padding: 2px 0; min-height: 44px; min-width: 0; overflow: hidden; }
     .cal-net, .cal-ot { font-size: 0.55rem; letter-spacing: -0.5px; white-space: nowrap; text-overflow: clip; max-width: 100%; text-align: center; }
     .cal-day-num { font-size: 0.7rem; }
-    .cal-month-pills { gap: 0.125rem; }
+    .cal-filters { gap: 2px; }
+    .filter-btn { font-size: 0.62rem; padding: 4px 2px; }
   }
 
   /* Calendar */
   .cal-panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 1rem; box-shadow: var(--shadow-sm); position: sticky; top: 72px; overflow-x: hidden; overflow-y: auto; max-height: calc(100dvh - 80px); }
-  .cal-nav { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .cal-nav { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
   .cal-title { flex: 1; text-align: center; font-size: 0.95rem; }
-  .cal-month-pills { display: flex; gap: 0.375rem; justify-content: center; margin-top: 0.25rem; flex-wrap: wrap; }
   .cal-nav-right { display: flex; gap: 0.25rem; }
+  .cal-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .cal-stats { display: flex; gap: 0.375rem; flex-shrink: 0; }
+  .cal-filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 0.75rem; }
+  .filter-btn {
+    font-size: 0.7rem; font-weight: 600; font-family: var(--font);
+    padding: 5px 4px; border-radius: var(--radius-sm); text-align: center;
+    border: 1.5px solid var(--color-border); color: var(--color-text-muted);
+    background: var(--color-surface-2); cursor: pointer; white-space: nowrap;
+    transition: background var(--transition), color var(--transition), border-color var(--transition);
+  }
+  .filter-btn:hover { border-color: var(--color-primary); color: var(--color-text); }
+  .filter-btn--neg      { background: var(--color-ot-neg-subtle);  color: var(--color-ot-neg);  border-color: var(--color-ot-neg); }
+  .filter-btn--pos      { background: color-mix(in srgb, hsl(38 95% 55%) 15%, transparent); color: hsl(38 75% 40%); border-color: hsl(38 85% 55%); }
+  .filter-btn--live     { background: var(--color-live-subtle);    color: var(--color-live);    border-color: var(--color-live); }
+  .filter-btn--warn     { background: color-mix(in srgb, hsl(38 90% 50%) 15%, transparent); color: hsl(38 80% 40%); border-color: hsl(38 80% 50%); }
+  .filter-btn--rebalance { background: var(--color-primary-subtle); color: var(--color-primary); border-color: var(--color-primary); }
+  [data-theme="dark"] .filter-btn--pos  { color: hsl(38 90% 65%); }
+  [data-theme="dark"] .filter-btn--warn { color: hsl(38 90% 65%); }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
   .cal-day-name { text-align: center; font-size: 0.7rem; font-weight: 700; color: var(--color-text-muted); padding: 4px 0; text-transform: uppercase; }
   .cal-cell--empty { background: transparent; }
@@ -1545,10 +1560,6 @@
   .cal-cell--off-day { background: color-mix(in srgb, var(--color-text-muted) 6%, var(--color-surface-2)); }
   .cal-cell--off-day .cal-day-num { color: var(--color-text-muted); }
   .cal-cell--override { outline: 1.5px dashed var(--color-primary); outline-offset: -2px; }
-  .active-filter-under-min  { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
-  .active-filter-above-max  { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
-  .active-filter-open       { border-color: color-mix(in srgb, var(--color-live) 40%, transparent) !important; }
-  .active-filter-unopen     { border-color: color-mix(in srgb, hsl(38 90% 50%) 40%, transparent) !important; }
   .cal-cell--open-session   { border-bottom: 3px solid var(--color-live); }
   .cal-cell--unopen-session { border-bottom: 3px solid hsl(38 90% 50%); }
   .cal-day-num { font-size: 0.9rem; font-weight: 600; }
