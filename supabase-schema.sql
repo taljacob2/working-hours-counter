@@ -17,8 +17,7 @@ create table if not exists public.work_logs (
 
 alter table public.work_logs enable row level security;
 
-drop policy if exists "Auth users full access" on public.work_logs;
-create policy "Auth users full access"
+create policy if not exists "Auth users full access"
   on public.work_logs
   for all
   to authenticated
@@ -37,8 +36,7 @@ create table if not exists public.work_settings (
 
 alter table public.work_settings enable row level security;
 
-drop policy if exists "Auth users full access" on public.work_settings;
-create policy "Auth users full access"
+create policy if not exists "Auth users full access"
   on public.work_settings
   for all
   to authenticated
@@ -59,8 +57,7 @@ create table if not exists public.rebalance_history (
 
 alter table public.rebalance_history enable row level security;
 
-drop policy if exists "own rows only" on public.rebalance_history;
-create policy "own rows only"
+create policy if not exists "own rows only"
   on public.rebalance_history
   for all
   using  (user_id = auth.uid())
