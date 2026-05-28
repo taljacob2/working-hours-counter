@@ -15,7 +15,7 @@
   let filterUnderMin = false
   let filterAboveMax = false
   let filterOpenSession = false
-  let filterBrokenSession = false
+  let filterUnopenSession = false
 
   // ── Calendar helpers ─────────────────────────────────────────
   const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -47,16 +47,16 @@
       const homeMs = computeNetMs(dl.filter(l => l.platform === 'home'),   (isOpen && key === todayKey) ? currentTime : null)
       const underMin = !dayIsOff && netMs > 0 && netMs < minMs
       const aboveMax = !dayIsOff && netMs > maxHours * 3_600_000
-      let hasBrokenSession = false
+      let hasUnopenSession = false
       let openCount = 0
       for (const l of dl) {
         if (l.action === 'resume') openCount++
         else if (l.action === 'pause') {
-          if (openCount === 0) { hasBrokenSession = true; break }
+          if (openCount === 0) { hasUnopenSession = true; break }
           openCount--
         }
       }
-      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff, hasOverride, isOpen, hasBrokenSession })
+      cells.push({ d, key, count: dl.length, netMs, otMs, offMs, homeMs, underMin, aboveMax, isOff: dayIsOff, hasOverride, isOpen, hasUnopenSession })
     }
     return cells
   }
@@ -925,13 +925,13 @@
             ▶ Unclosed
           </button>
           <button
-            class="pill {filterBrokenSession ? 'pill-warn' : 'pill-muted'}"
+            class="pill {filterUnopenSession ? 'pill-warn' : 'pill-muted'}"
             style="cursor: pointer; border: 1.5px solid transparent;"
-            class:active-filter-broken={filterBrokenSession}
-            on:click={() => filterBrokenSession = !filterBrokenSession}
-            title="Filter to days with a pause log that has no matching resume"
+            class:active-filter-unopen={filterUnopenSession}
+            on:click={() => filterUnopenSession = !filterUnopenSession}
+            title="Filter to days with a pause log that has no matching resume (unopen session)"
           >
-            ⚠ Broken
+            ⚠ Unopen
           </button>
         </div>
       </div>
@@ -962,9 +962,9 @@
             class:cal-cell--ot-neg={cell.otMs !== null && cell.otMs < 0}
             class:cal-cell--under-min={effectiveUnderMin}
             class:cal-cell--above-max={effectiveAboveMax}
-            class:cal-cell--filtered-out={(filterUnderMin && !effectiveUnderMin) || (filterAboveMax && !effectiveAboveMax) || (filterOpenSession && !cell.isOpen) || (filterBrokenSession && !cell.hasBrokenSession)}
+            class:cal-cell--filtered-out={(filterUnderMin && !effectiveUnderMin) || (filterAboveMax && !effectiveAboveMax) || (filterOpenSession && !cell.isOpen) || (filterUnopenSession && !cell.hasUnopenSession)}
             class:cal-cell--open-session={cell.isOpen}
-            class:cal-cell--broken-session={cell.hasBrokenSession}
+            class:cal-cell--unopen-session={cell.hasUnopenSession}
             class:cal-cell--rebal-donor={showRebalancing && rebalMap[cell.key] < 0}
             class:cal-cell--rebal-recipient={showRebalancing && rebalMap[cell.key] > 0}
             on:click={() => selectedDate.set(cell.key)}
@@ -1548,9 +1548,9 @@
   .active-filter-under-min  { border-color: color-mix(in srgb, var(--color-ot-neg) 30%, transparent) !important; }
   .active-filter-above-max  { border-color: color-mix(in srgb, hsl(38 95% 55%) 40%, transparent) !important; }
   .active-filter-open       { border-color: color-mix(in srgb, var(--color-live) 40%, transparent) !important; }
-  .active-filter-broken     { border-color: color-mix(in srgb, hsl(38 90% 50%) 40%, transparent) !important; }
+  .active-filter-unopen     { border-color: color-mix(in srgb, hsl(38 90% 50%) 40%, transparent) !important; }
   .cal-cell--open-session   { border-bottom: 3px solid var(--color-live); }
-  .cal-cell--broken-session { border-bottom: 3px solid hsl(38 90% 50%); }
+  .cal-cell--unopen-session { border-bottom: 3px solid hsl(38 90% 50%); }
   .cal-day-num { font-size: 0.9rem; font-weight: 600; }
   .cal-net { font-size: 0.72rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .cal-ot { font-size: 0.7rem; font-weight: 600; font-variant-numeric: tabular-nums; }
