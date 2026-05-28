@@ -52,8 +52,10 @@
 
     geoWatcher = new GeoFenceWatcher({
       location: loc,
-      onEnter: () => pressOffice('resume'),
-      onLeave: () => pressOffice('pause'),
+      enterThresholdMs: (loc.resumeThresholdHours ?? 2) * 3_600_000,
+      leaveThresholdMs: (loc.pauseThresholdHours  ?? 2) * 3_600_000,
+      onEnter: crossedAt => pressOffice('resume', crossedAt),
+      onLeave: crossedAt => pressOffice('pause',  crossedAt),
     })
     geoWatcher.start()
   }
@@ -68,20 +70,20 @@
 
   onDestroy(stopGeoFence)
 
-  async function pressOffice(action) {
+  async function pressOffice(action, crossedAt = new Date()) {
     const sb = getSupabase()
-    const today = dateKey()
-    const { data: todayLogs } = await sb.from('work_logs')
-      .select('*').eq('date_key', today).eq('platform', 'office')
+    const dk = dateKey(crossedAt)
+    const { data: dayLogs } = await sb.from('work_logs')
+      .select('*').eq('date_key', dk).eq('platform', 'office')
       .order('timestamp', { ascending: false }).limit(1)
-    const last = todayLogs?.[0]
+    const last = dayLogs?.[0]
     if (last?.action === action) return  // already in this state — idempotent
     const entry = {
       id: crypto.randomUUID(),
       platform: 'office',
       action,
-      timestamp: new Date().toISOString(),
-      date_key: today,
+      timestamp: crossedAt.toISOString(),
+      date_key: dk,
       created_at: new Date().toISOString(),
       note: '',
     }

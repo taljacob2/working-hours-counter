@@ -227,8 +227,14 @@
   autoTrackEnabled.subscribe(v => autoTrackLocal = v)
 
   let officeRadiusLocal = 200
+  let resumeThresholdLocal = 2
+  let pauseThresholdLocal = 2
   $: activeLocLocal = officeLocsLocal.find(l => l.id === activeOfficeIdLocal) ?? null
-  $: if (activeLocLocal) officeRadiusLocal = activeLocLocal.radiusMeters
+  $: if (activeLocLocal) {
+    officeRadiusLocal = activeLocLocal.radiusMeters
+    resumeThresholdLocal = activeLocLocal.resumeThresholdHours ?? 2
+    pauseThresholdLocal  = activeLocLocal.pauseThresholdHours  ?? 2
+  }
 
   let newLocName = ''
   let addingLocation = false
@@ -241,7 +247,7 @@
         addingLocation = false
         const id = crypto.randomUUID()
         const name = newLocName.trim() || 'Office'
-        const loc = { id, name, lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: 200 }
+        const loc = { id, name, lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: 200, resumeThresholdHours: 2, pauseThresholdHours: 2 }
         newLocName = ''
         await saveLocations([...officeLocsLocal, loc], id, true)
         showToast(`Added "${loc.name}"`, 'success')
@@ -260,6 +266,14 @@
   async function updateActiveRadius() {
     if (!activeLocLocal) return
     const updated = officeLocsLocal.map(l => l.id === activeOfficeIdLocal ? { ...l, radiusMeters: officeRadiusLocal } : l)
+    await saveLocations(updated, activeOfficeIdLocal, false)
+  }
+
+  async function updateThresholds() {
+    if (!activeLocLocal) return
+    const updated = officeLocsLocal.map(l => l.id === activeOfficeIdLocal
+      ? { ...l, resumeThresholdHours: resumeThresholdLocal, pauseThresholdHours: pauseThresholdLocal }
+      : l)
     await saveLocations(updated, activeOfficeIdLocal, false)
   }
 
@@ -597,6 +611,28 @@
               <input type="number" min="50" max="2000" step="50"
                 bind:value={officeRadiusLocal} on:change={updateActiveRadius} style="width:80px" />
               <span class="hours-label">m</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 0.75rem;">
+            <label style="font-size: 0.8rem;">Resume after being inside for: <strong>{resumeThresholdLocal}h</strong></label>
+            <div class="hours-row" style="margin-top: 0.25rem;">
+              <input type="range" min="0.25" max="8" step="0.25"
+                bind:value={resumeThresholdLocal} on:change={updateThresholds} style="flex:1" />
+              <input type="number" min="0.25" max="8" step="0.25"
+                bind:value={resumeThresholdLocal} on:change={updateThresholds} style="width:80px" />
+              <span class="hours-label">h</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 0.75rem;">
+            <label style="font-size: 0.8rem;">Pause after being outside for: <strong>{pauseThresholdLocal}h</strong></label>
+            <div class="hours-row" style="margin-top: 0.25rem;">
+              <input type="range" min="0.25" max="8" step="0.25"
+                bind:value={pauseThresholdLocal} on:change={updateThresholds} style="flex:1" />
+              <input type="number" min="0.25" max="8" step="0.25"
+                bind:value={pauseThresholdLocal} on:change={updateThresholds} style="width:80px" />
+              <span class="hours-label">h</span>
             </div>
           </div>
 

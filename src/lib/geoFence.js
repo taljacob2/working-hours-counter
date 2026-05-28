@@ -32,17 +32,21 @@ export class GeoFenceWatcher {
   #location       // { lat, lng, radiusMeters }
   #onEnter        // () => void
   #onLeave        // () => void
-  #insideOffice = null   // confirmed state: null=unknown, true=inside, false=outside
-  #pendingInside = null  // transition being waited on (null = none)
-  #watchId = null       // web watchPosition ID
-  #nativePlugin = null  // @capgo/background-geolocation plugin ref
+  #insideOffice = null    // confirmed state: null=unknown, true=inside, false=outside
+  #pendingInside = null   // transition being waited on (null = none)
+  #pendingCrossedAt = null // wall-clock time when the current pending transition started
+  #watchId = null         // web watchPosition ID
+  #nativePlugin = null    // @capgo/background-geolocation plugin ref
   #hysteresisTimer = null
-  #HYSTERESIS_MS = 30_000  // must be inside/outside for 30s before firing
+  #enterThresholdMs       // ms inside required before onEnter fires
+  #leaveThresholdMs       // ms outside required before onLeave fires
 
-  constructor({ location, onEnter, onLeave }) {
+  constructor({ location, onEnter, onLeave, enterThresholdMs = 7_200_000, leaveThresholdMs = 7_200_000 }) {
     this.#location = location
     this.#onEnter = onEnter
     this.#onLeave = onLeave
+    this.#enterThresholdMs = enterThresholdMs
+    this.#leaveThresholdMs = leaveThresholdMs
   }
 
   async start() {
@@ -54,7 +58,7 @@ export class GeoFenceWatcher {
   }
 
   stop() {
-    if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null; this.#pendingInside = null }
+    if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null; this.#pendingInside = null; this.#pendingCrossedAt = null }
     if (this.#nativePlugin) {
       this.#nativePlugin.removeAllListeners?.()
       this.#nativePlugin.stopBackgroundTask?.()
@@ -68,8 +72,9 @@ export class GeoFenceWatcher {
 
   updateLocation(location) {
     this.#location = location
-    this.#insideOffice = null   // reset confirmed state — next position update re-evaluates
+    this.#insideOffice = null
     this.#pendingInside = null
+    this.#pendingCrossedAt = null
     if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null }
   }
 
@@ -129,15 +134,19 @@ export class GeoFenceWatcher {
       return
     }
 
-    // New transition direction — start/restart hysteresis timer
+    // New transition direction — record crossing time, start threshold timer
     if (this.#hysteresisTimer) clearTimeout(this.#hysteresisTimer)
     this.#pendingInside = nowInside
+    this.#pendingCrossedAt = new Date()
+    const threshold = nowInside ? this.#enterThresholdMs : this.#leaveThresholdMs
     this.#hysteresisTimer = setTimeout(() => {
       this.#hysteresisTimer = null
       this.#pendingInside = null
+      const crossedAt = this.#pendingCrossedAt
+      this.#pendingCrossedAt = null
       this.#insideOffice = nowInside
-      if (nowInside) this.#onEnter()
-      else           this.#onLeave()
-    }, this.#HYSTERESIS_MS)
+      if (nowInside) this.#onEnter(crossedAt)
+      else           this.#onLeave(crossedAt)
+    }, threshold)
   }
 }
