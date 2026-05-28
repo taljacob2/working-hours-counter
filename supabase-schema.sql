@@ -1,7 +1,7 @@
 -- ============================================================
 -- Work Hours Logger — Supabase Schema
 -- Run this in: Supabase Dashboard → SQL Editor → New query
--- Safe to re-run: all statements use IF NOT EXISTS / IF EXISTS guards
+-- Safe to re-run: uses IF NOT EXISTS and exception-safe DO blocks
 -- ============================================================
 
 -- 1. Work logs table
@@ -17,12 +17,12 @@ create table if not exists public.work_logs (
 
 alter table public.work_logs enable row level security;
 
-create policy if not exists "Auth users full access"
-  on public.work_logs
-  for all
-  to authenticated
-  using (true)
-  with check (true);
+do $$ begin
+  create policy "Auth users full access"
+    on public.work_logs for all to authenticated
+    using (true) with check (true);
+exception when duplicate_object then null;
+end $$;
 
 create index if not exists work_logs_date_key_idx on public.work_logs (date_key);
 
@@ -36,12 +36,12 @@ create table if not exists public.work_settings (
 
 alter table public.work_settings enable row level security;
 
-create policy if not exists "Auth users full access"
-  on public.work_settings
-  for all
-  to authenticated
-  using (true)
-  with check (true);
+do $$ begin
+  create policy "Auth users full access"
+    on public.work_settings for all to authenticated
+    using (true) with check (true);
+exception when duplicate_object then null;
+end $$;
 
 -- ============================================================
 
@@ -57,11 +57,13 @@ create table if not exists public.rebalance_history (
 
 alter table public.rebalance_history enable row level security;
 
-create policy if not exists "own rows only"
-  on public.rebalance_history
-  for all
-  using  (user_id = auth.uid())
-  with check (user_id = auth.uid());
+do $$ begin
+  create policy "own rows only"
+    on public.rebalance_history for all
+    using  (user_id = auth.uid())
+    with check (user_id = auth.uid());
+exception when duplicate_object then null;
+end $$;
 
 create index if not exists rebalance_history_user_month_idx
   on public.rebalance_history (user_id, month_key, applied_at);
