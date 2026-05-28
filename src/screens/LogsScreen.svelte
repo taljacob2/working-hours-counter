@@ -362,7 +362,7 @@
       if (delta === 0) continue
       const dayCell = calDays.find(c => c?.key === dk)
       const currentOt = dayCell?.otMs ?? 0
-      const isDonor    = rebalancing.stillAboveMax.includes(dk)
+      const isDonor    = (rebalMap[dk] ?? 0) < 0
       const isExcessOt = !isDonor && (rebalancing.excessOtRecipients?.has(dk) ?? false)
       breakdown.push({ dk, isDonor, isExcessOt, currentOt, projectedOt: currentOt + delta, delta })
       totalDelta += delta
@@ -1002,8 +1002,10 @@
                       <tr>
                         <td>{fmtKeyShort(row.dk)}</td>
                         <td>
-                          {#if row.isDonor}
+                          {#if row.isDonor && rebalancing.stillAboveMax.includes(row.dk)}
                             <span class="pill pill-ot-neg" style="font-size:0.68rem;">Hours trimmed (over {$maximumDailyHours}h)</span>
+                          {:else if row.isDonor}
+                            <span class="pill pill-ot-neg" style="font-size:0.68rem;">OT donated</span>
                           {:else if row.isExcessOt}
                             <span class="pill pill-excess-ot" style="font-size:0.68rem;">Home sessions added (step 2)</span>
                           {:else}
