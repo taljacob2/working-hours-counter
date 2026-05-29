@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
-  import { exportCsv } from '../lib/exportUtils.js'
+  import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
 
   let reqHoursLocal = 9
@@ -131,14 +131,18 @@
     return `work-logs-${mo}${platSuffix}${compactSuffix}${heSuffix}`
   }
 
-  function doExport() {
+  async function doExport() {
     const subset = _expSubset()
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
-    exportCsv(subset, `${_expFileStem()}.csv`, use24Local, expCompact, expHebrew)
-    showToast(`Exported ${subset.length} records`, 'success')
+    try {
+      await exportCsv(subset, `${_expFileStem()}.csv`, use24Local, expCompact, expHebrew)
+      showToast(`Exported ${subset.length} records`, 'success')
+    } catch (e) {
+      if (e?.message !== 'cancelled') showToast('Export failed', 'error')
+    }
   }
 
-  function doExportJson() {
+  async function doExportJson() {
     const subset = _expSubset()
     if (!subset.length) { showToast('No logs for that month', 'info'); return }
     const { start, end } = monthBounds(expYear, expMonth)
@@ -152,11 +156,12 @@
       day_schedule: monthDayOverrides,
       logs: subset,
     }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `${_expFileStem()}.json`; a.click()
-    URL.revokeObjectURL(url)
-    showToast(`Exported ${subset.length} records as JSON`, 'success')
+    try {
+      await saveFile(JSON.stringify(payload, null, 2), `${_expFileStem()}.json`, 'application/json')
+      showToast(`Exported ${subset.length} records as JSON`, 'success')
+    } catch (e) {
+      if (e?.message !== 'cancelled') showToast('Export failed', 'error')
+    }
   }
 
   // ── Import ────────────────────────────────────────────────────

@@ -1,10 +1,30 @@
+import { Capacitor, registerPlugin } from '@capacitor/core'
+
 const HE = {
   headers:  { id: 'מזהה', date_key: 'תאריך', timestamp: 'תאריך ושעה', platform: 'מיקום', action: 'פעולה', created_at: 'נוצר בתאריך', note: 'הערה' },
   platform: { office: 'משרד', home: 'בית' },
   action:   { resume: 'כניסה', pause: 'יציאה' },
 }
 
-export function exportCsv(logs, filename = 'work-logs.csv', use24Hour = true, compact = false, hebrew = false) {
+const FileSaver = Capacitor.isNativePlatform() ? registerPlugin('FileSaver') : null
+
+// On Android shows a native "Save to…" folder picker via ACTION_CREATE_DOCUMENT.
+// On web falls back to the browser download trick.
+export async function saveFile(content, filename, mimeType) {
+  if (FileSaver) {
+    await FileSaver.saveFile({ content, filename, mimeType })
+  } else {
+    const blob = new Blob([content], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+}
+
+export async function exportCsv(logs, filename = 'work-logs.csv', use24Hour = true, compact = false, hebrew = false) {
   const cols = compact
     ? ['timestamp', 'platform', 'action']
     : ['id', 'date_key', 'timestamp', 'platform', 'action', 'created_at', 'note']
@@ -21,11 +41,5 @@ export function exportCsv(logs, filename = 'work-logs.csv', use24Hour = true, co
     }).join(',')
   )
   const csv = [header, ...rows].join('\n')
-  const blob = new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  await saveFile('﻿' + csv, filename, 'text/csv;charset=utf-8;')
 }
