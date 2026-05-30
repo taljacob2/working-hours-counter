@@ -12,7 +12,8 @@
   import SignInScreen   from './screens/SignInScreen.svelte'
   import MainScreen     from './screens/MainScreen.svelte'
   import LogsScreen     from './screens/LogsScreen.svelte'
-  import SettingsScreen from './screens/SettingsScreen.svelte'
+  import SettingsScreen   from './screens/SettingsScreen.svelte'
+  import AnalyticsScreen  from './screens/AnalyticsScreen.svelte'
 
   onMount(async () => {
     // Apply saved theme
@@ -162,7 +163,7 @@
     }
   }
 
-  $: isApp = ['main', 'logs', 'settings'].includes($screen)
+  $: isApp = ['main', 'logs', 'analytics', 'settings'].includes($screen)
 </script>
 
 <Spinner />
@@ -181,6 +182,8 @@
       <MainScreen />
     {:else if $screen === 'logs'}
       <LogsScreen />
+    {:else if $screen === 'analytics'}
+      <AnalyticsScreen />
     {:else if $screen === 'settings'}
       <SettingsScreen />
     {/if}

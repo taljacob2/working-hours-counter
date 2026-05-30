@@ -4,9 +4,10 @@
   import { showToast } from '../stores/appStore.js'
 
   const tabs = [
-    { id: 'main',     icon: '🏠', label: 'Main' },
-    { id: 'logs',     icon: '📋', label: 'Logs' },
-    { id: 'settings', icon: '⚙️', label: 'Settings' },
+    { id: 'main',      icon: '🏠', label: 'Main' },
+    { id: 'logs',      icon: '📋', label: 'Logs' },
+    { id: 'analytics', icon: '📊', label: 'Stats' },
+    { id: 'settings',  icon: '⚙️', label: 'Settings' },
   ]
 
   function toggleTheme() {
@@ -103,7 +104,7 @@
       flex-direction: column; gap: 0.125rem; justify-content: center;
       padding: 0.25rem 0.5rem; font-size: 0.7rem; 
       min-height: 48px; border-radius: var(--radius-md); 
-      flex: 1; max-width: 30%;
+      flex: 1; max-width: 25%;
     }
     .tab-icon { font-size: 1.25rem; }
     .topbar__actions { gap: 0.125rem; }

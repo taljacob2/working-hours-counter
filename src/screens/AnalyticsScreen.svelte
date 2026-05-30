@@ -1,0 +1,483 @@
+<script>
+  import { onDestroy } from 'svelte'
+  import { logs, requiredHours, minimumDailyHours, offDays, dayOverrides } from '../stores/appStore.js'
+  import { computeNetMs, byTs, isOffDay, dateKey, fmtDuration, monthCumulativeOtMs } from '../lib/timeUtils.js'
+
+  let now = new Date()
+  const ticker = setInterval(() => { now = new Date() }, 60_000)
+  onDestroy(() => clearInterval(ticker))
+
+  let period = 'week'
+
+  const _today = new Date()
+  const currentYear  = _today.getFullYear()
+  const currentMonth = _today.getMonth() + 1
+
+  // ── Date helpers ─────────────────────────────────────────────
+
+  function getLastNDays(n) {
+    const days = []
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(now.getDate() - i)
+      days.push(dateKey(d))
+    }
+    return days
+  }
+
+  function getCurrentMonthDays() {
+    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+    const days = []
+    for (let d = 1; d <= daysInMonth; d++) {
+      days.push(`${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`)
+    }
+    return days
+  }
+
+  function dayNetMs(dk, logsArr, currentTime) {
+    const dayLogs = logsArr.filter(l => l.date_key === dk).sort(byTs)
+    const isOpen  = dayLogs.length > 0 && dayLogs.at(-1).action === 'resume'
+    return computeNetMs(dayLogs, isOpen && dk === dateKey(currentTime) ? currentTime : null)
+  }
+
+  function monthName() {
+    return new Date(currentYear, currentMonth - 1, 1)
+      .toLocaleString('default', { month: 'long' })
+  }
+
+  // ── Reactive chart data ──────────────────────────────────────
+
+  $: todayDk = dateKey(now)
+
+  $: chartDays = period === 'week' ? getLastNDays(7) : getCurrentMonthDays()
+
+  $: dayData = chartDays.map(dk => {
+    const netMs   = dayNetMs(dk, $logs, now)
+    const isOff   = isOffDay(dk, $offDays, $dayOverrides)
+    const isFuture = dk > todayDk
+    const hasLogs  = $logs.some(l => l.date_key === dk)
+    return { dk, netMs, isOff, isFuture, hasLogs }
+  })
+
+  // ── Summary metrics ──────────────────────────────────────────
+
+  $: weekTotalMs = getLastNDays(7).reduce((s, dk) => s + dayNetMs(dk, $logs, now), 0)
+
+  $: monthAvgMs = (() => {
+    const worked = getCurrentMonthDays()
+      .filter(dk => dk <= todayDk && $logs.some(l => l.date_key === dk))
+    if (worked.length === 0) return 0
+    return worked.reduce((s, dk) => s + dayNetMs(dk, $logs, now), 0) / worked.length
+  })()
+
+  $: streak = (() => {
+    const minMs = $minimumDailyHours * 3_600_000
+    let count = 0
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(now)
+      d.setDate(now.getDate() - i)
+      const dk = dateKey(d)
+      if (isOffDay(dk, $offDays, $dayOverrides)) continue
+      const net = dayNetMs(dk, $logs, now)
+      if (net >= minMs) {
+        count++
+      } else if (dk === todayDk && !$logs.some(l => l.date_key === dk)) {
+        continue // today not yet started — don't break streak
+      } else {
+        break
+      }
+    }
+    return count
+  })()
+
+  $: cumOtMs = monthCumulativeOtMs($logs, currentYear, currentMonth, $requiredHours, $offDays, $dayOverrides)
+
+  // ── Platform split ───────────────────────────────────────────
+
+  $: platformSplit = (() => {
+    const monthStart = `${currentYear}-${String(currentMonth).padStart(2,'0')}-01`
+    const ml = $logs.filter(l => l.date_key >= monthStart && l.date_key <= todayDk)
+    const officeMs = computeNetMs(ml.filter(l => l.platform === 'office').sort(byTs))
+    const homeMs   = computeNetMs(ml.filter(l => l.platform === 'home').sort(byTs))
+    const total = officeMs + homeMs
+    return {
+      officeMs, homeMs, total,
+      officePct: total > 0 ? officeMs / total : 0,
+      homePct:   total > 0 ? homeMs   / total : 0,
+    }
+  })()
+
+  // ── SVG bar chart ────────────────────────────────────────────
+
+  const CW = 400, CH = 180
+  const PL = 36, PR = 8, PT = 12, PB = 28
+  const IW = CW - PL - PR
+  const IH = CH - PT - PB
+
+  $: maxHrs  = Math.max($requiredHours + 2, 12)
+  $: maxMs_  = maxHrs * 3_600_000
+  $: bGap    = IW / Math.max(1, dayData.length)
+  $: bW      = Math.max(2, bGap * 0.65)
+
+  function bX(i) { return PL + i * bGap + (bGap - bW) / 2 }
+  function bYtop(ms) { return PT + IH - Math.min(1, ms / maxMs_) * IH }
+  function bH(ms)    { return Math.max(0, Math.min(1, ms / maxMs_) * IH) }
+
+  function barFill(day) {
+    if (day.isFuture || !day.hasLogs) return 'var(--color-border)'
+    const minMs = $minimumDailyHours * 3_600_000
+    const reqMs = $requiredHours * 3_600_000
+    if (day.netMs < minMs) return 'var(--color-ot-neg)'
+    if (day.netMs >= reqMs) return 'var(--color-ot-pos)'
+    return 'var(--color-primary)'
+  }
+
+  $: targetY = PT + IH - ($requiredHours / maxHrs) * IH
+
+  $: yTicks = [
+    { y: PT + IH,       label: '0' },
+    { y: PT + IH * 0.5, label: `${Math.round(maxHrs / 2)}h` },
+    { y: PT,            label: `${maxHrs}h` },
+  ]
+
+  function xLabel(dk) {
+    const d = new Date(dk + 'T12:00:00')
+    return period === 'week'
+      ? ['Su','Mo','Tu','We','Th','Fr','Sa'][d.getDay()]
+      : String(d.getDate())
+  }
+
+  function showXLabel(i) {
+    if (period === 'week') return true
+    if (chartDays.length <= 15) return true
+    return i === 0 || (i + 1) % 5 === 0 || i === chartDays.length - 1
+  }
+
+  // ── Sparkline (cumulative OT) ────────────────────────────────
+
+  $: sparkPts = (() => {
+    const reqMs = $requiredHours * 3_600_000
+    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+    const pts = []
+    let cum = 0
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dk = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+      if (dk > todayDk) break
+      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      if (dayLogs.length > 0) {
+        const isOpen = dayLogs.at(-1).action === 'resume'
+        const netMs  = computeNetMs(dayLogs, isOpen && dk === todayDk ? now : null)
+        cum += isOffDay(dk, $offDays, $dayOverrides) ? netMs : netMs - reqMs
+      }
+      pts.push(cum)
+    }
+    return pts
+  })()
+
+  const SW = 280, SH = 56
+
+  $: spMin   = sparkPts.length > 0 ? Math.min(0, ...sparkPts) : 0
+  $: spMax   = sparkPts.length > 0 ? Math.max(0, ...sparkPts) : 3_600_000
+  $: spRange = Math.max(spMax - spMin, 3_600_000)
+
+  function spX(i) { return sparkPts.length > 1 ? (i / (sparkPts.length - 1)) * SW : SW / 2 }
+  function spY(v) { return SH - ((v - spMin) / spRange) * SH }
+
+  $: sparkPath = sparkPts.length > 0
+    ? 'M ' + sparkPts.map((v, i) => `${spX(i).toFixed(1)},${spY(v).toFixed(1)}`).join(' L ')
+    : ''
+
+  $: areaPath = sparkPts.length > 0
+    ? `${sparkPath} L ${spX(sparkPts.length - 1).toFixed(1)},${SH} L 0,${SH} Z`
+    : ''
+
+  $: zeroLineY = spY(0)
+</script>
+
+<main class="analytics">
+
+  <!-- Period toggle -->
+  <div class="period-toggle">
+    <button class="period-btn" class:active={period === 'week'}  on:click={() => period = 'week'}>Week</button>
+    <button class="period-btn" class:active={period === 'month'} on:click={() => period = 'month'}>Month</button>
+  </div>
+
+  <!-- Summary metrics -->
+  <div class="metrics-row">
+    <div class="card metric-card">
+      <div class="metric-label">This week</div>
+      <div class="metric-value tabnum">{fmtDuration(weekTotalMs)}</div>
+    </div>
+    <div class="card metric-card">
+      <div class="metric-label">Daily avg</div>
+      <div class="metric-value tabnum">{fmtDuration(monthAvgMs)}</div>
+      <div class="metric-sub">this month</div>
+    </div>
+    <div class="card metric-card">
+      <div class="metric-label">Streak</div>
+      <div class="metric-value streak-val tabnum">{streak}</div>
+      <div class="metric-sub">days</div>
+    </div>
+  </div>
+
+  <!-- Bar chart -->
+  <div class="card">
+    <div class="section-title">{period === 'week' ? 'Last 7 days' : 'This month'}</div>
+    <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
+      <!-- Y gridlines + labels -->
+      {#each yTicks as tick}
+        <line
+          x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
+          style="stroke: var(--color-border)" stroke-width="1"
+        />
+        <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9" style="fill: var(--color-text-muted)">{tick.label}</text>
+      {/each}
+
+      <!-- Required-hours target line -->
+      <line
+        x1={PL} y1={targetY} x2={CW - PR} y2={targetY}
+        style="stroke: var(--color-primary)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5"
+      />
+
+      <!-- Bars -->
+      {#each dayData as day, i}
+        {#if day.hasLogs || !day.isFuture}
+          <rect
+            x={bX(i)} y={bYtop(day.netMs)}
+            width={bW} height={bH(day.netMs)}
+            rx="2"
+            style="fill: {barFill(day)}"
+          />
+        {/if}
+        <!-- Empty-day placeholder bar (1px) -->
+        {#if !day.hasLogs && !day.isFuture}
+          <rect
+            x={bX(i)} y={PT + IH - 1}
+            width={bW} height="1"
+            style="fill: var(--color-border)"
+          />
+        {/if}
+      {/each}
+
+      <!-- X axis labels -->
+      {#each chartDays as dk, i}
+        {#if showXLabel(i)}
+          <text
+            x={bX(i) + bW / 2} y={CH - 6}
+            text-anchor="middle" font-size="9"
+            font-weight={dk === todayDk ? '700' : '400'}
+            style="fill: {dk === todayDk ? 'var(--color-primary)' : 'var(--color-text-muted)'}"
+          >{xLabel(dk)}</text>
+        {/if}
+      {/each}
+    </svg>
+
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background: var(--color-ot-pos)"></span>≥ required</span>
+      <span class="legend-item"><span class="legend-dot" style="background: var(--color-primary)"></span>partial</span>
+      <span class="legend-item"><span class="legend-dot" style="background: var(--color-ot-neg)"></span>under min</span>
+    </div>
+  </div>
+
+  <!-- Cumulative OT balance -->
+  <div class="card ot-card">
+    <div class="ot-header">
+      <div>
+        <div class="section-title">OT Balance · {monthName()}</div>
+        <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
+          {fmtDuration(cumOtMs, true)}
+        </div>
+      </div>
+      <svg class="sparkline" viewBox="0 0 {SW} {SH}">
+        <!-- Zero baseline -->
+        {#if spMin < 0 && spMax > 0}
+          <line x1="0" y1={zeroLineY} x2={SW} y2={zeroLineY}
+            style="stroke: var(--color-border)" stroke-width="1" />
+        {/if}
+        <!-- Area fill -->
+        {#if areaPath}
+          <path d={areaPath}
+            style="fill: {cumOtMs >= 0 ? 'var(--color-ot-pos-subtle)' : 'var(--color-ot-neg-subtle)'}" />
+        {/if}
+        <!-- Line -->
+        {#if sparkPath}
+          <path d={sparkPath} fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+            style="stroke: {cumOtMs >= 0 ? 'var(--color-ot-pos)' : 'var(--color-ot-neg)'}" />
+        {/if}
+      </svg>
+    </div>
+  </div>
+
+  <!-- Platform split -->
+  {#if platformSplit.total > 0}
+    <div class="card">
+      <div class="section-title">Platform split · {monthName()}</div>
+      <div class="split-bar-wrap">
+        <div class="split-bar">
+          {#if platformSplit.officePct > 0}
+            <div class="split-seg split-office" style="width: {(platformSplit.officePct * 100).toFixed(1)}%"></div>
+          {/if}
+          {#if platformSplit.homePct > 0}
+            <div class="split-seg split-home" style="width: {(platformSplit.homePct * 100).toFixed(1)}%"></div>
+          {/if}
+        </div>
+      </div>
+      <div class="split-labels">
+        <span class="split-label">
+          <span class="split-dot" style="background: var(--color-office)"></span>
+          Office — {fmtDuration(platformSplit.officeMs)} ({(platformSplit.officePct * 100).toFixed(0)}%)
+        </span>
+        <span class="split-label">
+          <span class="split-dot" style="background: var(--color-home)"></span>
+          Home — {fmtDuration(platformSplit.homeMs)} ({(platformSplit.homePct * 100).toFixed(0)}%)
+        </span>
+      </div>
+    </div>
+  {/if}
+
+</main>
+
+<style>
+  .analytics {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* ── Period toggle ── */
+  .period-toggle {
+    display: flex;
+    background: var(--color-surface-2);
+    border-radius: var(--radius-md);
+    padding: 3px;
+    gap: 2px;
+  }
+  .period-btn {
+    flex: 1;
+    padding: var(--space-2) var(--space-4);
+    border-radius: calc(var(--radius-md) - 3px);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+  }
+  .period-btn.active {
+    background: var(--color-surface);
+    color: var(--color-primary);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ── Metric cards ── */
+  .metric-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-1);
+    padding: var(--space-4) var(--space-3);
+  }
+  .metric-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+  .metric-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--color-text);
+    line-height: 1;
+  }
+  .streak-val { color: var(--color-primary); }
+  .metric-sub {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+  }
+
+  /* ── Bar chart ── */
+  .chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    margin-top: var(--space-3);
+  }
+  .legend {
+    display: flex;
+    gap: var(--space-4);
+    justify-content: center;
+    margin-top: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 0.72rem;
+    color: var(--color-text-muted);
+  }
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── OT balance card ── */
+  .ot-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+  .ot-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-top: var(--space-2);
+    line-height: 1;
+  }
+  .ot-value.positive { color: var(--color-ot-pos); }
+  .ot-value.negative { color: var(--color-ot-neg); }
+  .sparkline {
+    width: 120px;
+    height: 56px;
+    flex-shrink: 0;
+  }
+
+  /* ── Platform split ── */
+  .split-bar-wrap { margin-top: var(--space-3); }
+  .split-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--color-surface-2);
+  }
+  .split-seg { height: 100%; transition: width var(--transition); }
+  .split-office { background: var(--color-office); }
+  .split-home   { background: var(--color-home); }
+  .split-labels {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+  }
+  .split-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+  }
+  .split-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+</style>
