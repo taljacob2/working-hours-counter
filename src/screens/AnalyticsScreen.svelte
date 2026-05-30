@@ -107,6 +107,43 @@
     }
   })()
 
+  // ── Per-day platform breakdown ───────────────────────────────
+
+  $: platformDayData = getCurrentMonthDays().map(dk => {
+    const dayLogs  = $logs.filter(l => l.date_key === dk)
+    const isFuture = dk > todayDk
+
+    const offLogs  = dayLogs.filter(l => l.platform === 'office').sort(byTs)
+    const homeLogs = dayLogs.filter(l => l.platform === 'home').sort(byTs)
+    const offOpen  = offLogs.length  > 0 && offLogs.at(-1).action  === 'resume'
+    const homeOpen = homeLogs.length > 0 && homeLogs.at(-1).action === 'resume'
+    const isToday  = dk === todayDk
+
+    const officeMs = computeNetMs(offLogs,  offOpen  && isToday ? now : null)
+    const homeMs   = computeNetMs(homeLogs, homeOpen && isToday ? now : null)
+    return { dk, officeMs, homeMs, isFuture, hasLogs: dayLogs.length > 0 }
+  })
+
+  $: maxPlatMs  = Math.max(3_600_000, ...platformDayData.map(d => d.officeMs + d.homeMs))
+  $: maxPlatHrs = Math.ceil(maxPlatMs / 3_600_000)
+  $: pGap = IW / Math.max(1, platformDayData.length)
+  $: pW   = Math.max(2, pGap * 0.65)
+
+  function pX(i)    { return PL + i * pGap + (pGap - pW) / 2 }
+  function pHms(ms) { return Math.max(0, Math.min(1, ms / maxPlatMs) * IH) }
+
+  $: platYTicks = [
+    { y: PT + IH,       label: '0' },
+    { y: PT + IH * 0.5, label: `${Math.round(maxPlatHrs / 2)}h` },
+    { y: PT,            label: `${maxPlatHrs}h` },
+  ]
+
+  function showPlatLabel(i) {
+    const n = platformDayData.length
+    if (n <= 15) return true
+    return i === 0 || (i + 1) % 5 === 0 || i === n - 1
+  }
+
   // ── SVG bar chart ────────────────────────────────────────────
 
   const CW = 400, CH = 180
@@ -308,29 +345,85 @@
     </div>
   </div>
 
-  <!-- Platform split -->
+  <!-- Platform distribution across month -->
   {#if platformSplit.total > 0}
     <div class="card">
-      <div class="section-title">Platform split · {monthName()}</div>
-      <div class="split-bar-wrap">
-        <div class="split-bar">
-          {#if platformSplit.officePct > 0}
-            <div class="split-seg split-office" style="width: {(platformSplit.officePct * 100).toFixed(1)}%"></div>
+      <div class="section-title">Platform distribution · {monthName()}</div>
+
+      <!-- Stacked bar chart: office + home per day -->
+      <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
+        <!-- Y gridlines + labels -->
+        {#each platYTicks as tick}
+          <line x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
+            style="stroke: var(--color-border)" stroke-width="1" />
+          <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9"
+            style="fill: var(--color-text-muted)">{tick.label}</text>
+        {/each}
+
+        <!-- Stacked bars -->
+        {#each platformDayData as day, i}
+          {#if !day.isFuture}
+            <!-- Office segment (bottom) -->
+            {#if day.officeMs > 0}
+              <rect
+                x={pX(i)} y={PT + IH - pHms(day.officeMs)}
+                width={pW} height={pHms(day.officeMs)}
+                rx="2"
+                style="fill: var(--color-office)"
+              />
+            {/if}
+            <!-- Home segment (stacked on top) -->
+            {#if day.homeMs > 0}
+              <rect
+                x={pX(i)} y={PT + IH - pHms(day.officeMs) - pHms(day.homeMs)}
+                width={pW} height={pHms(day.homeMs)}
+                rx="2"
+                style="fill: var(--color-home)"
+              />
+            {/if}
+            <!-- Empty-day placeholder -->
+            {#if !day.hasLogs}
+              <rect x={pX(i)} y={PT + IH - 1} width={pW} height="1"
+                style="fill: var(--color-border)" />
+            {/if}
           {/if}
-          {#if platformSplit.homePct > 0}
-            <div class="split-seg split-home" style="width: {(platformSplit.homePct * 100).toFixed(1)}%"></div>
+        {/each}
+
+        <!-- X axis labels -->
+        {#each platformDayData as day, i}
+          {#if showPlatLabel(i)}
+            <text
+              x={pX(i) + pW / 2} y={CH - 6}
+              text-anchor="middle" font-size="9"
+              font-weight={day.dk === todayDk ? '700' : '400'}
+              style="fill: {day.dk === todayDk ? 'var(--color-primary)' : 'var(--color-text-muted)'}"
+            >{new Date(day.dk + 'T12:00:00').getDate()}</text>
           {/if}
+        {/each}
+      </svg>
+
+      <!-- Monthly totals summary -->
+      <div class="split-summary">
+        <div class="split-bar-wrap">
+          <div class="split-bar">
+            {#if platformSplit.officePct > 0}
+              <div class="split-seg split-office" style="width: {(platformSplit.officePct * 100).toFixed(1)}%"></div>
+            {/if}
+            {#if platformSplit.homePct > 0}
+              <div class="split-seg split-home" style="width: {(platformSplit.homePct * 100).toFixed(1)}%"></div>
+            {/if}
+          </div>
         </div>
-      </div>
-      <div class="split-labels">
-        <span class="split-label">
-          <span class="split-dot" style="background: var(--color-office)"></span>
-          Office — {fmtDuration(platformSplit.officeMs)} ({(platformSplit.officePct * 100).toFixed(0)}%)
-        </span>
-        <span class="split-label">
-          <span class="split-dot" style="background: var(--color-home)"></span>
-          Home — {fmtDuration(platformSplit.homeMs)} ({(platformSplit.homePct * 100).toFixed(0)}%)
-        </span>
+        <div class="split-labels">
+          <span class="split-label">
+            <span class="split-dot" style="background: var(--color-office)"></span>
+            Office — {fmtDuration(platformSplit.officeMs)} ({(platformSplit.officePct * 100).toFixed(0)}%)
+          </span>
+          <span class="split-label">
+            <span class="split-dot" style="background: var(--color-home)"></span>
+            Home — {fmtDuration(platformSplit.homeMs)} ({(platformSplit.homePct * 100).toFixed(0)}%)
+          </span>
+        </div>
       </div>
     </div>
   {/if}
@@ -450,7 +543,8 @@
   }
 
   /* ── Platform split ── */
-  .split-bar-wrap { margin-top: var(--space-3); }
+  .split-summary { margin-top: var(--space-4); }
+  .split-bar-wrap { margin-top: var(--space-2); }
   .split-bar {
     display: flex;
     height: 10px;
