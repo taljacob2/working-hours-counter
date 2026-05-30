@@ -560,7 +560,7 @@
       </p>
     </div>
 
-    <button class="btn btn-primary" style="margin-top:1.5rem" on:click={saveSettings}>
+    <button class="btn btn-primary btn-full" style="margin-top:1.5rem" on:click={saveSettings}>
       💾 Save settings
     </button>
 
@@ -598,10 +598,10 @@
       </label>
     </div>
     <div class="export-row">
-      <button class="btn btn-primary" on:click={doExport} disabled={expCount === 0}>
+      <button class="btn btn-primary" style="flex:1" on:click={doExport} disabled={expCount === 0}>
         ⬇ Export CSV
       </button>
-      <button class="btn btn-secondary" on:click={doExportJson} disabled={expCount === 0} title="Export as JSON — can be re-imported to restore this state">
+      <button class="btn btn-secondary" style="flex:1" on:click={doExportJson} disabled={expCount === 0} title="Export as JSON — can be re-imported to restore this state">
         ⬇ Export JSON
       </button>
     </div>
@@ -623,18 +623,18 @@
         <span class="info-text">Deletes all logs for the file's month(s) first, then inserts the imported records. True restore.</span>
       </div>
     </div>
+    <input
+      bind:this={importFileInput}
+      type="file"
+      accept=".json,application/json"
+      on:change={e => importFile = e.target.files[0] ?? null}
+      style="margin-top: 0.75rem; font-size: 0.875rem;"
+    />
     <div class="export-row" style="margin-top: 0.75rem;">
-      <input
-        bind:this={importFileInput}
-        type="file"
-        accept=".json,application/json"
-        on:change={e => importFile = e.target.files[0] ?? null}
-        style="flex: 1; font-size: 0.875rem;"
-      />
-      <button class="btn btn-secondary" on:click={doImportMerge} disabled={!importFile || importing}>
+      <button class="btn btn-secondary" style="flex:1" on:click={doImportMerge} disabled={!importFile || importing}>
         {importing ? '⏳…' : '⬆ Merge'}
       </button>
-      <button class="btn btn-primary" on:click={doImportReplace} disabled={!importFile || importing}>
+      <button class="btn btn-danger" style="flex:1" on:click={doImportReplace} disabled={!importFile || importing}>
         {importing ? '⏳…' : '⬆ Replace'}
       </button>
     </div>
@@ -726,10 +726,10 @@
           </div>
 
           <div class="export-row" style="margin-top: 0.75rem;">
-            <button class="btn btn-sm btn-secondary" on:click={updateActiveGPS} disabled={addingLocation}>
+            <button class="btn btn-secondary" style="flex:1" on:click={updateActiveGPS} disabled={addingLocation}>
               {addingLocation ? '⏳…' : '📍 Update GPS'}
             </button>
-            <button class="btn btn-sm {autoTrackLocal ? 'btn-primary' : 'btn-secondary'}" on:click={toggleAutoTrack}>
+            <button class="btn {autoTrackLocal ? 'btn-primary' : 'btn-secondary'}" style="flex:1" on:click={toggleAutoTrack}>
               {autoTrackLocal ? '✅ Auto-track ON' : '⏸ Auto-track OFF'}
             </button>
           </div>
@@ -757,8 +757,8 @@
     <p class="section-title">Account &amp; Connection</p>
     <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
     <div class="account-actions">
-      <button class="btn btn-secondary" on:click={reconfigure}>🔧 Reconfigure</button>
-      <button class="btn btn-danger" on:click={signOut}>🚪 Sign out</button>
+      <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
+      <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
     </div>
   </div>
 </div>
