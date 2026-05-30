@@ -211,24 +211,32 @@
     return pts
   })()
 
-  const SW = 280, SH = 56
-
   $: spMin   = sparkPts.length > 0 ? Math.min(0, ...sparkPts) : 0
   $: spMax   = sparkPts.length > 0 ? Math.max(0, ...sparkPts) : 3_600_000
   $: spRange = Math.max(spMax - spMin, 3_600_000)
 
-  function spX(i) { return sparkPts.length > 1 ? (i / (sparkPts.length - 1)) * SW : SW / 2 }
-  function spY(v) { return SH - ((v - spMin) / spRange) * SH }
+  // Full-width OT chart helpers (reuse CW/CH/PL/PR/PT/PB/IW/IH from bar chart)
+  $: otZeroY = PT + IH - ((0 - spMin) / spRange) * IH
 
-  $: sparkPath = sparkPts.length > 0
-    ? 'M ' + sparkPts.map((v, i) => `${spX(i).toFixed(1)},${spY(v).toFixed(1)}`).join(' L ')
+  $: otPath = sparkPts.length > 0
+    ? 'M ' + sparkPts.map((v, i) => {
+        const x = sparkPts.length > 1 ? PL + (i / (sparkPts.length - 1)) * IW : PL + IW / 2
+        const y = PT + IH - ((v - spMin) / spRange) * IH
+        return `${x.toFixed(1)},${y.toFixed(1)}`
+      }).join(' L ')
     : ''
 
-  $: areaPath = sparkPts.length > 0
-    ? `${sparkPath} L ${spX(sparkPts.length - 1).toFixed(1)},${SH} L 0,${SH} Z`
+  $: otAreaPath = otPath
+    ? `${otPath} L ${(PL + IW).toFixed(1)},${otZeroY.toFixed(1)} L ${PL.toFixed(1)},${otZeroY.toFixed(1)} Z`
     : ''
 
-  $: zeroLineY = spY(0)
+  $: otYTicks = (() => {
+    if (sparkPts.length === 0) return []
+    const ticks = [{ y: otZeroY, label: '0' }]
+    if (spMax > 0) ticks.push({ y: PT, label: fmtDuration(spMax, true) })
+    if (spMin < 0) ticks.push({ y: PT + IH, label: fmtDuration(spMin, true) })
+    return ticks
+  })()
 </script>
 
 <main class="analytics">
@@ -317,32 +325,62 @@
   </div>
 
   <!-- Cumulative OT balance -->
-  <div class="card ot-card">
-    <div class="ot-header">
-      <div>
-        <div class="section-title">OT Balance · {monthName()}</div>
-        <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
-          {fmtDuration(cumOtMs, true)}
-        </div>
+  <div class="card">
+    <div class="ot-summary">
+      <div class="section-title">OT Balance · {monthName()}</div>
+      <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
+        {fmtDuration(cumOtMs, true)}
       </div>
-      <svg class="sparkline" viewBox="0 0 {SW} {SH}">
-        <!-- Zero baseline -->
-        {#if spMin < 0 && spMax > 0}
-          <line x1="0" y1={zeroLineY} x2={SW} y2={zeroLineY}
-            style="stroke: var(--color-border)" stroke-width="1" />
-        {/if}
-        <!-- Area fill -->
-        {#if areaPath}
-          <path d={areaPath}
-            style="fill: {cumOtMs >= 0 ? 'var(--color-ot-pos-subtle)' : 'var(--color-ot-neg-subtle)'}" />
-        {/if}
-        <!-- Line -->
-        {#if sparkPath}
-          <path d={sparkPath} fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
-            style="stroke: {cumOtMs >= 0 ? 'var(--color-ot-pos)' : 'var(--color-ot-neg)'}" />
-        {/if}
-      </svg>
     </div>
+
+    {#if otPath}
+      <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
+        <defs>
+          <!-- Clip to above-zero area (positive OT) -->
+          <clipPath id="ot-clip-pos">
+            <rect x={PL} y={PT} width={IW} height={Math.max(0, otZeroY - PT)} />
+          </clipPath>
+          <!-- Clip to below-zero area (negative OT) -->
+          <clipPath id="ot-clip-neg">
+            <rect x={PL} y={otZeroY} width={IW} height={Math.max(0, PT + IH - otZeroY)} />
+          </clipPath>
+        </defs>
+
+        <!-- Y gridlines + labels -->
+        {#each otYTicks as tick}
+          <line x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
+            style="stroke: {tick.label === '0' ? 'var(--color-text-muted)' : 'var(--color-border)'}"
+            stroke-width={tick.label === '0' ? 1.5 : 1}
+            stroke-dasharray={tick.label === '0' ? '' : '3,3'}
+          />
+          <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9"
+            style="fill: var(--color-text-muted)">{tick.label}</text>
+        {/each}
+
+        <!-- Positive area fill (above zero) -->
+        <path d={otAreaPath} clip-path="url(#ot-clip-pos)"
+          style="fill: var(--color-ot-pos-subtle)" />
+        <!-- Negative area fill (below zero) -->
+        <path d={otAreaPath} clip-path="url(#ot-clip-neg)"
+          style="fill: var(--color-ot-neg-subtle)" />
+
+        <!-- Line -->
+        <path d={otPath} fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"
+          style="stroke: {cumOtMs >= 0 ? 'var(--color-ot-pos)' : 'var(--color-ot-neg)'}" />
+
+        <!-- X axis: day labels every 5 days -->
+        {#each sparkPts as _, i}
+          {#if i === 0 || (i + 1) % 5 === 0 || i === sparkPts.length - 1}
+            {@const x = sparkPts.length > 1 ? PL + (i / (sparkPts.length - 1)) * IW : PL + IW / 2}
+            {@const dk = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(i + 1).padStart(2,'0')}`}
+            <text x={x.toFixed(1)} y={CH - 6} text-anchor="middle" font-size="9"
+              font-weight={dk === todayDk ? '700' : '400'}
+              style="fill: {dk === todayDk ? 'var(--color-primary)' : 'var(--color-text-muted)'}"
+            >{i + 1}</text>
+          {/if}
+        {/each}
+      </svg>
+    {/if}
   </div>
 
   <!-- Platform distribution across month -->
@@ -523,25 +561,20 @@
   }
 
   /* ── OT balance card ── */
-  .ot-header {
+  .ot-summary {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     justify-content: space-between;
     gap: var(--space-4);
+    flex-wrap: wrap;
   }
   .ot-value {
-    font-size: 1.75rem;
+    font-size: 2rem;
     font-weight: 700;
-    margin-top: var(--space-2);
     line-height: 1;
   }
   .ot-value.positive { color: var(--color-ot-pos); }
   .ot-value.negative { color: var(--color-ot-neg); }
-  .sparkline {
-    width: 120px;
-    height: 56px;
-    flex-shrink: 0;
-  }
 
   /* ── Platform split ── */
   .split-summary { margin-top: var(--space-4); }
