@@ -95,8 +95,8 @@
   // ── Platform split ───────────────────────────────────────────
 
   $: platformSplit = (() => {
-    const monthStart = `${currentYear}-${String(currentMonth).padStart(2,'0')}-01`
-    const ml = $logs.filter(l => l.date_key >= monthStart && l.date_key <= todayDk)
+    const days = new Set(chartDays)
+    const ml = $logs.filter(l => days.has(l.date_key) && l.date_key <= todayDk)
     const officeMs = computeNetMs(ml.filter(l => l.platform === 'office').sort(byTs))
     const homeMs   = computeNetMs(ml.filter(l => l.platform === 'home').sort(byTs))
     const total = officeMs + homeMs
@@ -109,7 +109,7 @@
 
   // ── Per-day platform breakdown ───────────────────────────────
 
-  $: platformDayData = getCurrentMonthDays().map(dk => {
+  $: platformDayData = chartDays.map(dk => {
     const dayLogs  = $logs.filter(l => l.date_key === dk)
     const isFuture = dk > todayDk
 
@@ -146,6 +146,7 @@
   ]
 
   function showPlatLabel(i) {
+    if (period === 'week') return true
     const n = platformDayData.length
     if (n <= 15) return true
     return i === 0 || (i + 1) % 5 === 0 || i === n - 1
@@ -393,7 +394,7 @@
   <!-- Platform distribution across month -->
   {#if platformSplit.total > 0}
     <div class="card">
-      <div class="section-title">Platform distribution · {monthName()}</div>
+      <div class="section-title">Platform distribution · {period === 'week' ? 'Last 7 days' : monthName()}</div>
 
       <!-- Stacked bar chart: office + home per day -->
       <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
@@ -440,7 +441,7 @@
               text-anchor="middle" font-size="9"
               font-weight={day.dk === todayDk ? '700' : '400'}
               style="fill: {day.dk === todayDk ? 'var(--color-primary)' : 'var(--color-text-muted)'}"
-            >{new Date(day.dk + 'T12:00:00').getDate()}</text>
+            >{xLabel(day.dk)}</text>
           {/if}
         {/each}
       </svg>
