@@ -90,7 +90,7 @@
     return count
   })()
 
-  $: cumOtMs = monthCumulativeOtMs($logs, currentYear, currentMonth, $requiredHours, $offDays, $dayOverrides)
+  $: cumOtMs = sparkPts.at(-1) ?? 0
 
   // ── Platform split ───────────────────────────────────────────
 
@@ -202,11 +202,9 @@
 
   $: sparkPts = (() => {
     const reqMs = $requiredHours * 3_600_000
-    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
     const pts = []
     let cum = 0
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dk = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+    for (const dk of chartDays) {
       if (dk > todayDk) break
       const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
       if (dayLogs.length > 0) {
@@ -335,7 +333,7 @@
   <!-- Cumulative OT balance -->
   <div class="card">
     <div class="ot-summary">
-      <div class="section-title">OT Balance · {monthName()}</div>
+      <div class="section-title">OT Balance · {period === 'week' ? 'Last 7 days' : monthName()}</div>
       <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
         {fmtDuration(cumOtMs, true)}
       </div>
@@ -376,15 +374,15 @@
         <path d={otPath} fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"
           style="stroke: {cumOtMs >= 0 ? 'var(--color-ot-pos)' : 'var(--color-ot-neg)'}" />
 
-        <!-- X axis: day labels every 5 days -->
+        <!-- X axis labels -->
         {#each sparkPts as _, i}
-          {#if i === 0 || (i + 1) % 5 === 0 || i === sparkPts.length - 1}
+          {#if showXLabel(i)}
             {@const x = sparkPts.length > 1 ? PL + (i / (sparkPts.length - 1)) * IW : PL + IW / 2}
-            {@const dk = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(i + 1).padStart(2,'0')}`}
+            {@const dk = chartDays[i]}
             <text x={x.toFixed(1)} y={CH - 6} text-anchor="middle" font-size="9"
               font-weight={dk === todayDk ? '700' : '400'}
               style="fill: {dk === todayDk ? 'var(--color-primary)' : 'var(--color-text-muted)'}"
-            >{i + 1}</text>
+            >{xLabel(dk)}</text>
           {/if}
         {/each}
       </svg>
