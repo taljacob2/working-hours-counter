@@ -334,6 +334,9 @@
     </div>
   </div>
 
+  <!-- 2×2 charts grid -->
+  <div class="charts-grid">
+
   <!-- Bar chart -->
   <div class="card">
     <div class="section-title">{period === 'week' ? 'Last 7 days' : 'This month'}</div>
@@ -452,6 +455,37 @@
     {/if}
   </div>
 
+  <!-- Avg hours by day of week (all historical data) -->
+  <div class="card">
+    <div class="section-title">Avg hours by weekday · all time</div>
+    <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
+      <!-- Y gridlines + labels -->
+      {#each wYTicks as tick}
+        <line x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
+          style="stroke: var(--color-border)" stroke-width="1" />
+        <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9"
+          style="fill: var(--color-text-muted)">{tick.label}</text>
+      {/each}
+      <line x1={PL} y1={wTargetY} x2={CW - PR} y2={wTargetY}
+        style="stroke: var(--color-primary)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5" />
+      {#each weekdayAvg as day, i}
+        {#if day.avgMs > 0}
+          <path d={roundedTopRect(wX(i), wBYtop(day.avgMs), wW, wBH(day.avgMs))}
+            opacity={day.enough ? 1 : 0.35} style="fill: {day.fill}" />
+          <text x={wX(i) + wW / 2} y={wBYtop(day.avgMs) - 3}
+            text-anchor="middle" font-size="8" style="fill: var(--color-text-muted)">{day.count}×</text>
+        {:else}
+          <rect x={wX(i)} y={PT + IH - 1} width={wW} height="1" style="fill: var(--color-border)" />
+        {/if}
+        <text x={wX(i) + wW / 2} y={CH - 6} text-anchor="middle" font-size="9"
+          font-weight={day.isOff ? '400' : '500'}
+          style="fill: {day.isOff ? 'var(--color-border)' : 'var(--color-text-muted)'}"
+        >{day.name}</text>
+      {/each}
+    </svg>
+    <div class="avg-note">Faded bar = fewer than 3 logged days on that weekday</div>
+  </div>
+
   <!-- Platform distribution across month -->
   {#if platformSplit.total > 0}
     <div class="card">
@@ -533,60 +567,29 @@
     </div>
   {/if}
 
-  <!-- Avg hours by day of week (all historical data) -->
-  <div class="card">
-    <div class="section-title">Avg hours by weekday · all time</div>
-    <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
-      <!-- Y gridlines + labels -->
-      {#each wYTicks as tick}
-        <line x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
-          style="stroke: var(--color-border)" stroke-width="1" />
-        <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9"
-          style="fill: var(--color-text-muted)">{tick.label}</text>
-      {/each}
-
-      <!-- Required-hours target line -->
-      <line x1={PL} y1={wTargetY} x2={CW - PR} y2={wTargetY}
-        style="stroke: var(--color-primary)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5" />
-
-      <!-- Bars -->
-      {#each weekdayAvg as day, i}
-        {#if day.avgMs > 0}
-          <path
-            d={roundedTopRect(wX(i), wBYtop(day.avgMs), wW, wBH(day.avgMs))}
-            opacity={day.enough ? 1 : 0.35}
-            style="fill: {day.fill}"
-          />
-          <!-- Sample count above bar -->
-          <text x={wX(i) + wW / 2} y={wBYtop(day.avgMs) - 3}
-            text-anchor="middle" font-size="8"
-            style="fill: var(--color-text-muted)">{day.count}×</text>
-        {:else}
-          <rect x={wX(i)} y={PT + IH - 1} width={wW} height="1"
-            style="fill: var(--color-border)" />
-        {/if}
-
-        <!-- Day name label -->
-        <text x={wX(i) + wW / 2} y={CH - 6} text-anchor="middle" font-size="9"
-          font-weight={day.isOff ? '400' : '500'}
-          style="fill: {day.isOff ? 'var(--color-border)' : 'var(--color-text-muted)'}"
-        >{day.name}</text>
-      {/each}
-    </svg>
-
-    <div class="avg-note">Faded bar = fewer than 3 logged days on that weekday</div>
-  </div>
+  </div> <!-- end charts-grid -->
 
 </main>
 
 <style>
   .analytics {
-    max-width: 600px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: var(--space-4);
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+  }
+
+  /* ── Charts 2×2 grid ── */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+  @media (max-width: 640px) {
+    .charts-grid { grid-template-columns: 1fr; }
   }
 
   /* ── Period toggle ── */
