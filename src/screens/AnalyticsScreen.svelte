@@ -589,6 +589,9 @@
     grid-template-columns: repeat(2, 1fr);
     gap: var(--space-4);
   }
+  .charts-grid > .card {
+    margin-top: 0;
+  }
   @media (max-width: 640px) {
     .charts-grid { grid-template-columns: 1fr; }
   }
