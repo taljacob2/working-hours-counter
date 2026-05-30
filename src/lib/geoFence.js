@@ -37,6 +37,7 @@ export class GeoFenceWatcher {
   #pendingCrossedAt = null // wall-clock time when the current pending transition started
   #watchId = null         // web watchPosition ID
   #nativePlugin = null    // @capgo/background-geolocation plugin ref
+  #nativeWatcherId = null // watcher ID returned by addWatcher, needed for removeWatcher
   #hysteresisTimer = null
   #enterThresholdMs       // ms inside required before onEnter fires
   #leaveThresholdMs       // ms outside required before onLeave fires
@@ -60,8 +61,10 @@ export class GeoFenceWatcher {
   stop() {
     if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null; this.#pendingInside = null; this.#pendingCrossedAt = null }
     if (this.#nativePlugin) {
-      this.#nativePlugin.removeAllListeners?.()
-      this.#nativePlugin.stopBackgroundTask?.()
+      if (this.#nativeWatcherId !== null) {
+        this.#nativePlugin.removeWatcher?.({ id: this.#nativeWatcherId })
+        this.#nativeWatcherId = null
+      }
       this.#nativePlugin = null
     }
     if (this.#watchId !== null && typeof navigator !== 'undefined') {
@@ -84,7 +87,7 @@ export class GeoFenceWatcher {
       const { BackgroundGeolocation } = await import('@capgo/background-geolocation')
       this.#nativePlugin = BackgroundGeolocation
 
-      await BackgroundGeolocation.addWatcher(
+      this.#nativeWatcherId = await BackgroundGeolocation.addWatcher(
         {
           backgroundMessage: 'Working Hours is tracking your office location.',
           backgroundTitle: 'Office Auto-Track',
@@ -119,6 +122,13 @@ export class GeoFenceWatcher {
     const dist = haversineMetres(lat, lng, this.#location.lat, this.#location.lng)
     const nowInside = dist <= this.#location.radiusMeters
 
+    // On first position fix, silently initialize state without firing any callback.
+    // We have no knowledge of prior confirmed state, so don't synthesize an onLeave.
+    if (this.#insideOffice === null) {
+      this.#insideOffice = nowInside
+      return
+    }
+
     if (nowInside === this.#insideOffice) {
       // Back to confirmed state — cancel any pending transition (bounce-back)
       if (this.#hysteresisTimer) {
@@ -130,7 +140,19 @@ export class GeoFenceWatcher {
     }
 
     if (nowInside === this.#pendingInside) {
-      // Already waiting to confirm this direction — don't reset the timer
+      // Already waiting to confirm this direction.
+      // Also fire immediately if the setTimeout was delayed in background (Doze, throttling).
+      const threshold = nowInside ? this.#enterThresholdMs : this.#leaveThresholdMs
+      if (Date.now() - this.#pendingCrossedAt.getTime() >= threshold) {
+        clearTimeout(this.#hysteresisTimer)
+        this.#hysteresisTimer = null
+        this.#pendingInside = null
+        const crossedAt = this.#pendingCrossedAt
+        this.#pendingCrossedAt = null
+        this.#insideOffice = nowInside
+        if (nowInside) this.#onEnter(crossedAt)
+        else           this.#onLeave(crossedAt)
+      }
       return
     }
 
