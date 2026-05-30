@@ -243,6 +243,59 @@
     if (spMin < 0) ticks.push({ y: PT + IH, label: fmtDuration(spMin, true) })
     return ticks
   })()
+
+  // ── Avg hours by day of week ─────────────────────────────────
+
+  const DOW_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+  $: weekdayAvg = (() => {
+    const minMs = $minimumDailyHours * 3_600_000
+    const reqMs = $requiredHours * 3_600_000
+    const buckets = Array.from({ length: 7 }, () => ({ totalMs: 0, count: 0 }))
+    const allDks = [...new Set($logs.map(l => l.date_key))].sort()
+    for (const dk of allDks) {
+      if (dk > todayDk) continue
+      if (isOffDay(dk, $offDays, $dayOverrides)) continue
+      const dayLogs = $logs.filter(l => l.date_key === dk).sort(byTs)
+      const isOpen  = dayLogs.at(-1)?.action === 'resume'
+      const netMs   = computeNetMs(dayLogs, isOpen && dk === todayDk ? now : null)
+      if (netMs > 0) {
+        const dow = new Date(dk + 'T12:00:00').getDay()
+        buckets[dow].totalMs += netMs
+        buckets[dow].count++
+      }
+    }
+    return DOW_NAMES.map((name, dow) => {
+      const { totalMs, count } = buckets[dow]
+      const avgMs  = count > 0 ? totalMs / count : 0
+      const enough = count >= 3
+      const isOff  = $offDays.includes(dow)
+      let fill = 'var(--color-border)'
+      if (avgMs > 0) {
+        if (!enough)          fill = 'var(--color-primary)'   // faded via opacity
+        else if (avgMs < minMs) fill = 'var(--color-ot-neg)'
+        else if (avgMs >= reqMs) fill = 'var(--color-ot-pos)'
+        else                   fill = 'var(--color-primary)'
+      }
+      return { name, dow, avgMs, count, isOff, enough, fill }
+    })
+  })()
+
+  const WN = 7  // always 7 bars
+  $: wGap = IW / WN
+  $: wW   = Math.max(4, wGap * 0.65)
+  $: wMaxHrs = Math.max($requiredHours + 2, 12)
+  $: wMaxMs  = wMaxHrs * 3_600_000
+  $: wTargetY = PT + IH - ($requiredHours / wMaxHrs) * IH
+  $: wYTicks  = [
+    { y: PT + IH,       label: '0' },
+    { y: PT + IH * 0.5, label: `${Math.round(wMaxHrs / 2)}h` },
+    { y: PT,            label: `${wMaxHrs}h` },
+  ]
+
+  function wX(i)      { return PL + i * wGap + (wGap - wW) / 2 }
+  function wBYtop(ms) { return PT + IH - Math.min(1, ms / wMaxMs) * IH }
+  function wBH(ms)    { return Math.max(0, Math.min(1, ms / wMaxMs) * IH) }
 </script>
 
 <main class="analytics">
@@ -470,6 +523,50 @@
     </div>
   {/if}
 
+  <!-- Avg hours by day of week (all historical data) -->
+  <div class="card">
+    <div class="section-title">Avg hours by weekday · all time</div>
+    <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
+      <!-- Y gridlines + labels -->
+      {#each wYTicks as tick}
+        <line x1={PL} y1={tick.y} x2={CW - PR} y2={tick.y}
+          style="stroke: var(--color-border)" stroke-width="1" />
+        <text x={PL - 4} y={tick.y + 4} text-anchor="end" font-size="9"
+          style="fill: var(--color-text-muted)">{tick.label}</text>
+      {/each}
+
+      <!-- Required-hours target line -->
+      <line x1={PL} y1={wTargetY} x2={CW - PR} y2={wTargetY}
+        style="stroke: var(--color-primary)" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.5" />
+
+      <!-- Bars -->
+      {#each weekdayAvg as day, i}
+        {#if day.avgMs > 0}
+          <path
+            d={roundedTopRect(wX(i), wBYtop(day.avgMs), wW, wBH(day.avgMs))}
+            opacity={day.enough ? 1 : 0.35}
+            style="fill: {day.fill}"
+          />
+          <!-- Sample count above bar -->
+          <text x={wX(i) + wW / 2} y={wBYtop(day.avgMs) - 3}
+            text-anchor="middle" font-size="8"
+            style="fill: var(--color-text-muted)">{day.count}×</text>
+        {:else}
+          <rect x={wX(i)} y={PT + IH - 1} width={wW} height="1"
+            style="fill: var(--color-border)" />
+        {/if}
+
+        <!-- Day name label -->
+        <text x={wX(i) + wW / 2} y={CH - 6} text-anchor="middle" font-size="9"
+          font-weight={day.isOff ? '400' : '500'}
+          style="fill: {day.isOff ? 'var(--color-border)' : 'var(--color-text-muted)'}"
+        >{day.name}</text>
+      {/each}
+    </svg>
+
+    <div class="avg-note">Faded bar = fewer than 3 logged days on that weekday</div>
+  </div>
+
 </main>
 
 <style>
@@ -611,5 +708,13 @@
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
+  }
+
+  /* ── Weekday avg chart ── */
+  .avg-note {
+    margin-top: var(--space-3);
+    font-size: 0.72rem;
+    color: var(--color-text-muted);
+    text-align: center;
   }
 </style>
