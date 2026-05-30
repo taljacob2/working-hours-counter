@@ -132,6 +132,13 @@
   function pX(i)    { return PL + i * pGap + (pGap - pW) / 2 }
   function pHms(ms) { return Math.max(0, Math.min(1, ms / maxPlatMs) * IH) }
 
+  // Rectangle with rounded top corners only (for topmost bar segment)
+  function roundedTopRect(x, y, w, h, r = 3) {
+    if (h <= 0 || w <= 0) return ''
+    const cr = Math.min(r, w / 2, h)
+    return `M ${x},${y + cr} Q ${x},${y} ${x + cr},${y} L ${x + w - cr},${y} Q ${x + w},${y} ${x + w},${y + cr} L ${x + w},${y + h} L ${x},${y + h} Z`
+  }
+
   $: platYTicks = [
     { y: PT + IH,       label: '0' },
     { y: PT + IH * 0.5, label: `${Math.round(maxPlatHrs / 2)}h` },
@@ -401,23 +408,21 @@
         <!-- Stacked bars -->
         {#each platformDayData as day, i}
           {#if !day.isFuture}
-            <!-- Office segment (bottom) -->
+            <!-- Office segment (bottom) — sharp corners when home sits on top, rounded top when alone -->
             {#if day.officeMs > 0}
-              <rect
-                x={pX(i)} y={PT + IH - pHms(day.officeMs)}
-                width={pW} height={pHms(day.officeMs)}
-                rx="2"
-                style="fill: var(--color-office)"
-              />
+              {#if day.homeMs > 0}
+                <rect x={pX(i)} y={PT + IH - pHms(day.officeMs)}
+                  width={pW} height={pHms(day.officeMs)}
+                  style="fill: var(--color-office)" />
+              {:else}
+                <path d={roundedTopRect(pX(i), PT + IH - pHms(day.officeMs), pW, pHms(day.officeMs))}
+                  style="fill: var(--color-office)" />
+              {/if}
             {/if}
-            <!-- Home segment (stacked on top) -->
+            <!-- Home segment (always topmost) — rounded top only -->
             {#if day.homeMs > 0}
-              <rect
-                x={pX(i)} y={PT + IH - pHms(day.officeMs) - pHms(day.homeMs)}
-                width={pW} height={pHms(day.homeMs)}
-                rx="2"
-                style="fill: var(--color-home)"
-              />
+              <path d={roundedTopRect(pX(i), PT + IH - pHms(day.officeMs) - pHms(day.homeMs), pW, pHms(day.homeMs))}
+                style="fill: var(--color-home)" />
             {/if}
             <!-- Empty-day placeholder -->
             {#if !day.hasLogs}
