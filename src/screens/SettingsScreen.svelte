@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled } from '../stores/appStore.js'
+  import { requestNotificationPermission } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -19,6 +20,25 @@
 
   let rebalHistoryCapLocal = 0
   rebalHistoryCap.subscribe(v => rebalHistoryCapLocal = v)
+
+  let notifMorningEnabledLocal = false
+  notifMorningEnabled.subscribe(v => notifMorningEnabledLocal = v)
+  let notifMorningTimeLocal = '09:00'
+  notifMorningTime.subscribe(v => notifMorningTimeLocal = v)
+  let notifEveningEnabledLocal = false
+  notifEveningEnabled.subscribe(v => notifEveningEnabledLocal = v)
+  let notifEveningTimeLocal = '19:00'
+  notifEveningTime.subscribe(v => notifEveningTimeLocal = v)
+  let notifTargetEnabledLocal = false
+  notifTargetEnabled.subscribe(v => notifTargetEnabledLocal = v)
+
+  async function toggleNotif(store, localSetter, newValue) {
+    if (newValue) {
+      const granted = await requestNotificationPermission()
+      if (!granted) { showToast('Notification permission denied', 'error'); return }
+    }
+    localSetter(newValue)
+  }
 
   let use24Local = true
   use24HourFormat.subscribe(v => use24Local = v)
@@ -75,6 +95,17 @@
     }
 
     const sb = getSupabase()
+    notifMorningEnabled.set(notifMorningEnabledLocal)
+    localStorage.setItem('whl_notif_morning', String(notifMorningEnabledLocal))
+    notifMorningTime.set(notifMorningTimeLocal)
+    localStorage.setItem('whl_notif_morning_time', notifMorningTimeLocal)
+    notifEveningEnabled.set(notifEveningEnabledLocal)
+    localStorage.setItem('whl_notif_evening', String(notifEveningEnabledLocal))
+    notifEveningTime.set(notifEveningTimeLocal)
+    localStorage.setItem('whl_notif_evening_time', notifEveningTimeLocal)
+    notifTargetEnabled.set(notifTargetEnabledLocal)
+    localStorage.setItem('whl_notif_target', String(notifTargetEnabledLocal))
+
     const upsertRows = [
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
       { key: 'minimumDailyHours', value: String(minHoursLocal) },
@@ -83,6 +114,11 @@
       { key: 'use24HourFormat', value: String(use24Local) },
       { key: 'offDays', value: JSON.stringify(offDaysLocal) },
       { key: 'rebalHistoryCap', value: String(rebalHistoryCapLocal) },
+      { key: 'notifMorningEnabled', value: String(notifMorningEnabledLocal) },
+      { key: 'notifMorningTime',    value: notifMorningTimeLocal },
+      { key: 'notifEveningEnabled', value: String(notifEveningEnabledLocal) },
+      { key: 'notifEveningTime',    value: notifEveningTimeLocal },
+      { key: 'notifTargetEnabled',  value: String(notifTargetEnabledLocal) },
     ]
     if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
     const { error } = await sb.from('work_settings').upsert(upsertRows)
@@ -560,6 +596,66 @@
       </p>
     </div>
 
+    <!-- Notifications -->
+    <div class="card" style="margin-top: var(--space-5)">
+      <p class="section-title">Notifications</p>
+
+      <!-- Morning check-in reminder -->
+      <div class="notif-row">
+        <div class="notif-info">
+          <span class="notif-label">Morning check-in reminder</span>
+          <span class="notif-desc">Reminds you to clock in on work days</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" checked={notifMorningEnabledLocal}
+            on:change={e => toggleNotif(notifMorningEnabled, v => notifMorningEnabledLocal = v, e.target.checked)} />
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      {#if notifMorningEnabledLocal}
+        <div class="notif-time-row">
+          <label class="notif-time-label">Reminder time</label>
+          <input type="time" bind:value={notifMorningTimeLocal} class="time-input" />
+        </div>
+      {/if}
+
+      <hr class="divider" />
+
+      <!-- Evening nudge -->
+      <div class="notif-row">
+        <div class="notif-info">
+          <span class="notif-label">Evening nudge</span>
+          <span class="notif-desc">Alerts if no work logged by end of day</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" checked={notifEveningEnabledLocal}
+            on:change={e => toggleNotif(notifEveningEnabled, v => notifEveningEnabledLocal = v, e.target.checked)} />
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      {#if notifEveningEnabledLocal}
+        <div class="notif-time-row">
+          <label class="notif-time-label">Nudge time</label>
+          <input type="time" bind:value={notifEveningTimeLocal} class="time-input" />
+        </div>
+      {/if}
+
+      <hr class="divider" />
+
+      <!-- Daily target reached -->
+      <div class="notif-row">
+        <div class="notif-info">
+          <span class="notif-label">Daily target reached</span>
+          <span class="notif-desc">Fires when you've clocked your required hours</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" checked={notifTargetEnabledLocal}
+            on:change={e => toggleNotif(notifTargetEnabled, v => notifTargetEnabledLocal = v, e.target.checked)} />
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
     <button class="btn btn-primary btn-full" style="margin-top:1.5rem" on:click={saveSettings}>
       💾 Save settings
     </button>
@@ -795,4 +891,48 @@
   .live-text-in  { color: var(--color-live); font-weight: 500; }
   .live-text-out { color: var(--color-ot-neg); font-weight: 500; }
   .live-text-pending { color: var(--color-text-muted); }
+
+  /* ── Notifications ── */
+  .notif-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+  }
+  .notif-info { display: flex; flex-direction: column; gap: 2px; }
+  .notif-label { font-size: 0.9rem; font-weight: 500; color: var(--color-text); }
+  .notif-desc  { font-size: 0.78rem; color: var(--color-text-muted); }
+
+  .notif-time-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) 0 var(--space-3);
+  }
+  .notif-time-label { font-size: 0.82rem; color: var(--color-text-muted); }
+  .time-input { width: 120px; text-align: center; }
+
+  /* iOS-style toggle */
+  .toggle { position: relative; display: inline-block; width: 44px; height: 26px; flex-shrink: 0; cursor: pointer; }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: var(--color-border);
+    border-radius: 13px;
+    transition: background var(--transition);
+  }
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    transition: transform var(--transition);
+  }
+  .toggle input:checked + .toggle-track { background: var(--color-primary); }
+  .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
 </style>

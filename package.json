@@ -20,6 +20,7 @@
   "dependencies": {
     "@capacitor/android": "^8.3.4",
     "@capacitor/core": "^8.3.4",
+    "@capacitor/local-notifications": "^8.2.0",
     "@capgo/background-geolocation": "^8.0.35",
     "@supabase/supabase-js": "^2.105.3",
     "gh-pages": "^6.3.0"

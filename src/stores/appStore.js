@@ -30,6 +30,13 @@ export const officeLocation = derived([officeLocations, activeOfficeId], ([$locs
 // Whether auto resume/pause via geofence is active
 export const autoTrackEnabled = writable(false)
 
+// ── Notifications ─────────────────────────────────────────────
+export const notifMorningEnabled = writable(false)
+export const notifMorningTime    = writable('09:00')
+export const notifEveningEnabled = writable(false)
+export const notifEveningTime    = writable('19:00')
+export const notifTargetEnabled  = writable(false)
+
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')
 export const toasts = writable([])

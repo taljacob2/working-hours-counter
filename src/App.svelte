@@ -1,9 +1,10 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
+  import { rescheduleAll, cancelTodayReminders, scheduleTargetReached, cancelTargetReached } from './lib/notifications.js'
 
   import Spinner     from './components/Spinner.svelte'
   import Toast       from './components/Toast.svelte'
@@ -40,6 +41,7 @@
     await loadAll(sb)
     screen.set('main')
     startGeoFence()
+    scheduleNotifications()
   })
 
   // ── GeoFence watcher ─────────────────────────────────────────
@@ -69,6 +71,27 @@
   // Re-start whenever settings change
   $: if ($autoTrackEnabled !== undefined || $officeLocation !== undefined) startGeoFence()
 
+  // ── Notifications ────────────────────────────────────────────
+  let notifReady = false
+
+  function scheduleNotifications() {
+    notifReady = true
+    rescheduleAll({
+      morningEnabled: $notifMorningEnabled,
+      morningTime:    $notifMorningTime,
+      eveningEnabled: $notifEveningEnabled,
+      eveningTime:    $notifEveningTime,
+      offDaysArr:     $offDays,
+      dayOverridesObj: $dayOverrides,
+    })
+  }
+
+  $: if (notifReady) scheduleNotifications(
+    $notifMorningEnabled, $notifMorningTime,
+    $notifEveningEnabled, $notifEveningTime,
+    $offDays, $dayOverrides
+  )
+
   onDestroy(stopGeoFence)
 
   async function pressOffice(action, crossedAt = new Date()) {
@@ -92,6 +115,12 @@
     if (error) { showToast('Auto-track save failed: ' + error.message, 'error'); return }
     logs.update(l => [...l, entry])
     showToast(`🏢 Auto-tracked: office ${action}d`, 'success')
+    if (action === 'resume') {
+      cancelTodayReminders()
+      if ($notifTargetEnabled) scheduleTargetReached(crossedAt, $requiredHours * 3_600_000)
+    } else {
+      cancelTargetReached()
+    }
   }
 
   async function loadAll(sb) {
@@ -156,6 +185,17 @@
 
       const rebalCapVal = settings?.find(s => s.key === 'rebalHistoryCap')?.value
       rebalHistoryCap.set(parseInt(rebalCapVal ?? localStorage.getItem('whl_rebal_history_cap') ?? '0', 10))
+
+      const nme = settings?.find(s => s.key === 'notifMorningEnabled')?.value
+      notifMorningEnabled.set((nme ?? localStorage.getItem('whl_notif_morning') ?? 'false') === 'true')
+      const nmt = settings?.find(s => s.key === 'notifMorningTime')?.value
+      notifMorningTime.set(nmt ?? localStorage.getItem('whl_notif_morning_time') ?? '09:00')
+      const nee = settings?.find(s => s.key === 'notifEveningEnabled')?.value
+      notifEveningEnabled.set((nee ?? localStorage.getItem('whl_notif_evening') ?? 'false') === 'true')
+      const net = settings?.find(s => s.key === 'notifEveningTime')?.value
+      notifEveningTime.set(net ?? localStorage.getItem('whl_notif_evening_time') ?? '19:00')
+      const nte = settings?.find(s => s.key === 'notifTargetEnabled')?.value
+      notifTargetEnabled.set((nte ?? localStorage.getItem('whl_notif_target') ?? 'false') === 'true')
     } catch (e) {
       console.error('loadAll error', e)
     } finally {
