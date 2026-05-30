@@ -338,7 +338,7 @@
   <div class="charts-grid">
 
   <!-- Bar chart -->
-  <div class="card">
+  <div class="card chart-hours">
     <div class="section-title">{period === 'week' ? 'Last 7 days' : 'This month'}</div>
     <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
       <!-- Y gridlines + labels -->
@@ -397,7 +397,7 @@
   </div>
 
   <!-- Cumulative OT balance -->
-  <div class="card">
+  <div class="card chart-ot">
     <div class="section-title">OT Balance · {period === 'week' ? 'Last 7 days' : monthName()}</div>
 
     {#if otPath}
@@ -458,7 +458,7 @@
   </div>
 
   <!-- Avg hours by day of week (all historical data) -->
-  <div class="card">
+  <div class="card chart-weekday">
     <div class="section-title">Avg hours by weekday · all time</div>
     <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
       <!-- Y gridlines + labels -->
@@ -490,7 +490,7 @@
 
   <!-- Platform distribution across month -->
   {#if platformSplit.total > 0}
-    <div class="card">
+    <div class="card chart-platform">
       <div class="section-title">Platform distribution · {period === 'week' ? 'Last 7 days' : monthName()}</div>
 
       <!-- Stacked bar chart: office + home per day -->
@@ -594,6 +594,7 @@
   }
   @media (max-width: 640px) {
     .charts-grid { grid-template-columns: 1fr; }
+    .chart-ot     { order: -1; }
   }
 
   /* ── Period toggle ── */
