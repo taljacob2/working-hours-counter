@@ -70,6 +70,11 @@
     return worked.reduce((s, dk) => s + dayNetMs(dk, $logs, now), 0) / worked.length
   })()
 
+  $: missedDays = getCurrentMonthDays()
+    .filter(dk => dk <= todayDk)
+    .filter(dk => !isOffDay(dk, $offDays, $dayOverrides) && !$logs.some(l => l.date_key === dk))
+    .length
+
   $: streak = (() => {
     const minMs = $minimumDailyHours * 3_600_000
     let count = 0
@@ -307,7 +312,7 @@
   </div>
 
   <!-- Summary metrics -->
-  <div class="metrics-row">
+  <div class="summary-cards">
     <div class="card metric-card">
       <div class="metric-label">This week</div>
       <div class="metric-value tabnum">{fmtDuration(weekTotalMs)}</div>
@@ -321,6 +326,11 @@
       <div class="metric-label">Streak</div>
       <div class="metric-value streak-val tabnum">{streak}</div>
       <div class="metric-sub">days</div>
+    </div>
+    <div class="card metric-card">
+      <div class="metric-label">Missed</div>
+      <div class="metric-value tabnum" class:missed-bad={missedDays > 0} class:missed-ok={missedDays === 0}>{missedDays}</div>
+      <div class="metric-sub">days this month</div>
     </div>
   </div>
 
@@ -603,6 +613,16 @@
     box-shadow: var(--shadow-sm);
   }
 
+  /* ── Summary cards grid (4-up) ── */
+  .summary-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-3);
+  }
+  @media (max-width: 540px) {
+    .summary-cards { grid-template-columns: repeat(2, 1fr); }
+  }
+
   /* ── Metric cards ── */
   .metric-card {
     display: flex;
@@ -626,7 +646,9 @@
     color: var(--color-text);
     line-height: 1;
   }
-  .streak-val { color: var(--color-primary); }
+  .streak-val  { color: var(--color-primary); }
+  .missed-bad  { color: var(--color-ot-neg); }
+  .missed-ok   { color: var(--color-ot-pos); }
   .metric-sub {
     font-size: 0.7rem;
     color: var(--color-text-muted);
