@@ -472,6 +472,7 @@
     text-align: center;
     gap: var(--space-1);
     padding: var(--space-4) var(--space-3);
+    margin-top: 0;
   }
   .metric-label {
     font-size: 0.7rem;
