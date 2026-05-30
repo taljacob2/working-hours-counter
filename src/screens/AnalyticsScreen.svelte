@@ -398,12 +398,7 @@
 
   <!-- Cumulative OT balance -->
   <div class="card">
-    <div class="ot-summary">
-      <div class="section-title">OT Balance · {period === 'week' ? 'Last 7 days' : monthName()}</div>
-      <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
-        {fmtDuration(cumOtMs, true)}
-      </div>
-    </div>
+    <div class="section-title">OT Balance · {period === 'week' ? 'Last 7 days' : monthName()}</div>
 
     {#if otPath}
       <svg class="chart-svg" viewBox="0 0 {CW} {CH}">
@@ -453,6 +448,13 @@
         {/each}
       </svg>
     {/if}
+
+    <div class="ot-total">
+      <div class="ot-value tabnum" class:positive={cumOtMs >= 0} class:negative={cumOtMs < 0}>
+        {fmtDuration(cumOtMs, true)}
+      </div>
+      <div class="metric-sub">total {period === 'week' ? 'this week' : 'this month'}</div>
+    </div>
   </div>
 
   <!-- Avg hours by day of week (all historical data) -->
@@ -586,7 +588,6 @@
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: var(--space-4);
-    align-items: start;
   }
   @media (max-width: 640px) {
     .charts-grid { grid-template-columns: 1fr; }
@@ -687,15 +688,14 @@
   }
 
   /* ── OT balance card ── */
-  .ot-summary {
+  .ot-total {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
   }
   .ot-value {
-    font-size: 2rem;
+    font-size: 1.5rem;
     font-weight: 700;
     line-height: 1;
   }
