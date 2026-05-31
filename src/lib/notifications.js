@@ -32,7 +32,7 @@ async function getPlugin() {
 /** Ask Android for notification permission. Returns true if granted. */
 export async function requestNotificationPermission() {
   const plugin = await getPlugin()
-  if (!plugin) return false
+  if (!plugin) return true  // non-native: allow toggling settings; scheduling is a no-op anyway
   try {
     const { display } = await plugin.requestPermissions()
     return display === 'granted'
