@@ -1,8 +1,8 @@
 <script>
   import { onDestroy } from 'svelte'
-  import { logs, requiredHours, offDays, dayOverrides, showToast } from '../stores/appStore.js'
+  import { logs, requiredHours, minimumDailyHours, use24HourFormat, offDays, dayOverrides, showToast } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
-  import { computeNetMs, computeTotalMs, fmtDuration, dateKey, byTs,
+  import { computeNetMs, fmtDuration, dateKey, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
 
   // ── Live clock ────────────────────────────────────────────────
@@ -14,32 +14,47 @@
   $: todayKey = dateKey(now)
   $: todayLogs = $logs.filter(l => l.date_key === todayKey).sort(byTs)
   $: todayNetMs = computeNetMs(todayLogs, now)
-  $: todayTotalMs = computeTotalMs(todayLogs)
   $: reqMs = $requiredHours * 3_600_000
+  $: minMs = $minimumDailyHours * 3_600_000
   $: todayIsOffDay = isOffDay(todayKey, $offDays, $dayOverrides)
   $: todayOtMs = todayIsOffDay ? todayNetMs : todayNetMs - reqMs
 
   $: thisYear  = now.getFullYear()
   $: thisMonth = now.getMonth() + 1
-  $: monthLogs = $logs.filter(l => {
-    const { start, end } = monthBounds(thisYear, thisMonth)
-    return l.date_key >= start && l.date_key <= end
-  })
-  $: monthNetMs   = (() => {
+  $: monthNetMs = (() => {
     const days = loggedDaysInMonth($logs, thisYear, thisMonth)
     return days.reduce((acc, dk) => {
       const dl = $logs.filter(l => l.date_key === dk).sort(byTs)
       return acc + computeNetMs(dl, dk === todayKey ? now : null)
     }, 0)
   })()
-  $: monthTotalMs = (() => {
-    const days = loggedDaysInMonth($logs, thisYear, thisMonth)
-    return days.reduce((acc, dk) => {
-      const dl = $logs.filter(l => l.date_key === dk).sort(byTs)
-      return acc + computeTotalMs(dl)
-    }, 0)
-  })()
   $: cumOtMs = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours, $offDays, $dayOverrides)
+
+  // Avg logged hours per worked day this month
+  $: avgDailyMs = (() => {
+    const days = loggedDaysInMonth($logs, thisYear, thisMonth)
+    return days.length ? monthNetMs / days.length : 0
+  })()
+
+  // Progress bar
+  $: progressPct   = Math.min(100, reqMs > 0 ? (todayNetMs / reqMs) * 100 : 0)
+  $: progressColor = todayNetMs >= reqMs ? 'var(--color-ot-pos)'
+                   : todayNetMs >= minMs ? 'var(--color-primary)'
+                   : 'var(--color-ot-neg)'
+  $: minTickPct    = reqMs > 0 ? ($minimumDailyHours / $requiredHours) * 100 : 0
+
+  // "Leave by" time
+  $: leaveByDisplay = (() => {
+    if (todayIsOffDay) return { value: '—', done: false }
+    if (todayNetMs >= reqMs) return { value: 'Done ✓', done: true }
+    const leaveAt = new Date(now.getTime() + (reqMs - todayNetMs))
+    return {
+      value: leaveAt.toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', hour12: !$use24HourFormat,
+      }),
+      done: false,
+    }
+  })()
 
   // ── Platform state ───────────────────────────────────────────
   function platformState(platform, todayLogsArray) {
@@ -93,11 +108,27 @@
           {#if todayOtMs >= 0}🚀 Ahead by {fmtDuration(todayOtMs)}{:else}⏰ Need {fmtDuration(-todayOtMs)} more{/if}
         </span>
       </div>
-      <div class="metric-card">
-        <span class="metric-label">Gross total</span>
-        <span class="metric-value tabnum">{fmtDuration(todayTotalMs)}</span>
+      <div class="metric-card" class:leave-done={leaveByDisplay.done}>
+        <span class="metric-label">Leave by</span>
+        <span class="metric-value tabnum">{leaveByDisplay.value}</span>
       </div>
     </div>
+
+    <!-- Daily progress bar -->
+    {#if !todayIsOffDay}
+      <div class="progress-wrap">
+        <div class="progress-track">
+          <div class="progress-fill" style="width: {progressPct.toFixed(1)}%; background: {progressColor}"></div>
+          {#if $minimumDailyHours > 0 && $minimumDailyHours < $requiredHours}
+            <div class="progress-tick" style="left: {minTickPct.toFixed(1)}%"></div>
+          {/if}
+        </div>
+        <div class="progress-labels">
+          <span class="tabnum">{fmtDuration(todayNetMs)}</span>
+          <span class="tabnum">{fmtDuration(reqMs)} target</span>
+        </div>
+      </div>
+    {/if}
   </section>
 
   <!-- ── Month metrics ── -->
@@ -113,8 +144,8 @@
         <span class="metric-value tabnum">{fmtDuration(cumOtMs, true)}</span>
       </div>
       <div class="metric-card">
-        <span class="metric-label">Month gross</span>
-        <span class="metric-value tabnum">{fmtDuration(monthTotalMs)}</span>
+        <span class="metric-label">Avg / day</span>
+        <span class="metric-value tabnum">{fmtDuration(avgDailyMs)}</span>
       </div>
     </div>
     <!-- OT Banner -->
@@ -227,6 +258,30 @@
   .pause-btn:hover:not(:disabled) { background: var(--color-ot-neg-subtle); color: var(--color-ot-neg); border-color: var(--color-ot-neg); }
   .pause-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .action-btn.active { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent); }
+
+  /* Leave by — done state */
+  .leave-done .metric-value { color: var(--color-ot-pos); }
+
+  /* Daily progress bar */
+  .progress-wrap  { display: flex; flex-direction: column; gap: 0.375rem; }
+  .progress-track {
+    position: relative; height: 8px;
+    background: var(--color-surface-2); border-radius: 4px; overflow: visible;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 4px;
+    transition: width 0.5s ease, background var(--transition);
+    min-width: 3px;
+  }
+  .progress-tick {
+    position: absolute; top: -3px; bottom: -3px; width: 2px;
+    background: var(--color-text-muted); border-radius: 1px;
+    opacity: 0.45; transform: translateX(-50%);
+  }
+  .progress-labels {
+    display: flex; justify-content: space-between;
+    font-size: 0.72rem; color: var(--color-text-muted);
+  }
 
   /* ── Mobile compact layout ── */
   @media (max-width: 540px) {
