@@ -43,7 +43,7 @@
                    : 'var(--color-ot-neg)'
   $: minTickPct    = reqMs > 0 ? ($minimumDailyHours / $requiredHours) * 100 : 0
 
-  // "Leave by" time
+  // "Leave by" — normal (required hours)
   $: leaveByDisplay = (() => {
     if (todayIsOffDay) return { value: '—', done: false }
     if (todayNetMs >= reqMs) return { value: 'Done ✓', done: true }
@@ -55,6 +55,27 @@
       done: false,
     }
   })()
+
+  // "Leave by OT" — required hours adjusted by this month's cumulative OT,
+  // clamped so it never goes below minimumDailyHours.
+  // Positive OT → you can leave earlier. Negative OT → you need to stay later.
+  $: otAdjustedTarget = Math.max(minMs, reqMs - cumOtMs)
+
+  $: otLeaveByDisplay = (() => {
+    if (todayIsOffDay || otAdjustedTarget === reqMs) return null
+    if (todayNetMs >= otAdjustedTarget) return { value: 'Done ✓', done: true }
+    const leaveAt = new Date(now.getTime() + (otAdjustedTarget - todayNetMs))
+    return {
+      value: leaveAt.toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', hour12: !$use24HourFormat,
+      }),
+      done: false,
+    }
+  })()
+
+  // OT tick position on the bar (% of reqMs width); hidden if beyond bar
+  $: otTickPct   = reqMs > 0 ? (otAdjustedTarget / reqMs) * 100 : 0
+  $: showOtTick  = otLeaveByDisplay !== null && otTickPct < 99.5
 
   // ── Platform state ───────────────────────────────────────────
   function platformState(platform, todayLogsArray) {
@@ -111,6 +132,11 @@
       <div class="metric-card" class:leave-done={leaveByDisplay.done}>
         <span class="metric-label">Leave by</span>
         <span class="metric-value tabnum">{leaveByDisplay.value}</span>
+        {#if otLeaveByDisplay}
+          <span class="ot-leave-hint" class:ot-done={otLeaveByDisplay.done}>
+            ⚡ {otLeaveByDisplay.value}
+          </span>
+        {/if}
       </div>
     </div>
 
@@ -121,6 +147,9 @@
           <div class="progress-fill" style="width: {progressPct.toFixed(1)}%; background: {progressColor}"></div>
           {#if $minimumDailyHours > 0 && $minimumDailyHours < $requiredHours}
             <div class="progress-tick" style="left: {minTickPct.toFixed(1)}%"></div>
+          {/if}
+          {#if showOtTick}
+            <div class="progress-ot-tick" style="left: {otTickPct.toFixed(1)}%"></div>
           {/if}
         </div>
         <div class="progress-labels">
@@ -259,8 +288,14 @@
   .pause-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .action-btn.active { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent); }
 
-  /* Leave by — done state */
+  /* Leave by card */
   .leave-done .metric-value { color: var(--color-ot-pos); }
+  .ot-leave-hint {
+    font-size: 0.72rem; font-weight: 600;
+    color: var(--color-primary);
+    margin-top: 2px;
+  }
+  .ot-leave-hint.ot-done { color: var(--color-ot-pos); }
 
   /* Daily progress bar */
   .progress-wrap  { display: flex; flex-direction: column; gap: 0.375rem; }
@@ -277,6 +312,14 @@
     position: absolute; top: -3px; bottom: -3px; width: 2px;
     background: var(--color-text-muted); border-radius: 1px;
     opacity: 0.45; transform: translateX(-50%);
+  }
+  /* OT-adjusted target marker — diamond shape */
+  .progress-ot-tick {
+    position: absolute; top: 50%; width: 8px; height: 8px;
+    background: var(--color-primary);
+    border: 1.5px solid var(--color-surface);
+    border-radius: 2px;
+    transform: translate(-50%, -50%) rotate(45deg);
   }
   .progress-labels {
     display: flex; justify-content: space-between;
