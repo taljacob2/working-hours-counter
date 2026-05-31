@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -117,7 +117,7 @@
     showToast(`🏢 Auto-tracked: office ${action}d`, 'success')
     if (action === 'resume') {
       cancelTodayReminders()
-      if ($notifTargetEnabled) scheduleTargetReached(crossedAt, $requiredHours * 3_600_000)
+      if ($notifTargetEnabled) scheduleTargetReached(crossedAt, ($notifTargetHoursOverride ?? $requiredHours) * 3_600_000)
     } else {
       cancelTargetReached()
     }
@@ -196,6 +196,10 @@
       notifEveningTime.set(net ?? localStorage.getItem('whl_notif_evening_time') ?? '19:00')
       const nte = settings?.find(s => s.key === 'notifTargetEnabled')?.value
       notifTargetEnabled.set((nte ?? localStorage.getItem('whl_notif_target') ?? 'false') === 'true')
+      const ntho = settings?.find(s => s.key === 'notifTargetHoursOverride')?.value
+      const nthoLocal = localStorage.getItem('whl_notif_target_hours')
+      const nthoRaw = ntho ?? nthoLocal ?? ''
+      notifTargetHoursOverride.set(nthoRaw && nthoRaw !== '' ? parseFloat(nthoRaw) : null)
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

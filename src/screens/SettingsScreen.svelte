@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride } from '../stores/appStore.js'
   import { requestNotificationPermission } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
@@ -31,6 +31,8 @@
   notifEveningTime.subscribe(v => notifEveningTimeLocal = v)
   let notifTargetEnabledLocal = false
   notifTargetEnabled.subscribe(v => notifTargetEnabledLocal = v)
+  let notifTargetHoursLocal = null
+  notifTargetHoursOverride.subscribe(v => notifTargetHoursLocal = v)
 
   async function toggleNotif(store, localSetter, newValue) {
     if (newValue) {
@@ -105,6 +107,8 @@
     localStorage.setItem('whl_notif_evening_time', notifEveningTimeLocal)
     notifTargetEnabled.set(notifTargetEnabledLocal)
     localStorage.setItem('whl_notif_target', String(notifTargetEnabledLocal))
+    notifTargetHoursOverride.set(notifTargetHoursLocal)
+    localStorage.setItem('whl_notif_target_hours', notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '')
 
     const upsertRows = [
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
@@ -119,6 +123,7 @@
       { key: 'notifEveningEnabled', value: String(notifEveningEnabledLocal) },
       { key: 'notifEveningTime',    value: notifEveningTimeLocal },
       { key: 'notifTargetEnabled',  value: String(notifTargetEnabledLocal) },
+      { key: 'notifTargetHoursOverride', value: notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '' },
     ]
     if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
     const { error } = await sb.from('work_settings').upsert(upsertRows)
@@ -597,8 +602,8 @@
     </div>
 
     <!-- Notifications -->
-    <div class="card" style="margin-top: var(--space-5)">
-      <p class="section-title">Notifications</p>
+    <hr class="divider" />
+    <p class="section-title">Notifications</p>
 
       <!-- Morning check-in reminder -->
       <div class="notif-row">
@@ -646,7 +651,7 @@
       <div class="notif-row">
         <div class="notif-info">
           <span class="notif-label">Daily target reached</span>
-          <span class="notif-desc">Fires when you've clocked your required hours</span>
+          <span class="notif-desc">Fires when you've worked your target hours</span>
         </div>
         <label class="toggle">
           <input type="checkbox" checked={notifTargetEnabledLocal}
@@ -654,7 +659,24 @@
           <span class="toggle-track"></span>
         </label>
       </div>
-    </div>
+      {#if notifTargetEnabledLocal}
+        <div class="notif-time-row">
+          <div>
+            <span class="notif-time-label">Notify after</span>
+            <span class="notif-desc" style="display:block; font-size:0.72rem; margin-top:2px">
+              Default: {$requiredHours} h (required hours)
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:0.4rem">
+            <input type="number" min="1" max="14" step="0.5"
+              value={notifTargetHoursLocal ?? ''}
+              on:input={e => notifTargetHoursLocal = e.target.value ? parseFloat(e.target.value) : null}
+              placeholder={String($requiredHours)}
+              class="time-input" style="width:70px" />
+            <span style="font-size:0.82rem; color:var(--color-text-muted)">h</span>
+          </div>
+        </div>
+      {/if}
 
     <button class="btn btn-primary btn-full" style="margin-top:1.5rem" on:click={saveSettings}>
       💾 Save settings

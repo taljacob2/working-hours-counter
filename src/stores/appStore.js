@@ -36,6 +36,8 @@ export const notifMorningTime    = writable('09:00')
 export const notifEveningEnabled = writable(false)
 export const notifEveningTime    = writable('19:00')
 export const notifTargetEnabled  = writable(false)
+// null = use requiredHours; number = custom hours override
+export const notifTargetHoursOverride = writable(null)
 
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')
