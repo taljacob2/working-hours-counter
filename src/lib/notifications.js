@@ -53,6 +53,16 @@ export async function rescheduleAll({
   const plugin = await getPlugin()
   if (!plugin) return
 
+  // Ensure the notification channel exists on Android (idempotent)
+  await plugin.createChannel?.({
+    id: 'whl_reminders',
+    name: 'Work reminders',
+    importance: 3,
+    visibility: 1,
+    sound: 'default',
+    vibration: true,
+  }).catch(() => {})
+
   const allIds = [
     ...Array.from({ length: LOOKAHEAD_DAYS }, (_, i) => ({ id: ID_MORNING_BASE + i })),
     ...Array.from({ length: LOOKAHEAD_DAYS }, (_, i) => ({ id: ID_EVENING_BASE + i })),

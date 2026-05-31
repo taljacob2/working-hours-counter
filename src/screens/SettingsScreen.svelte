@@ -35,11 +35,11 @@
   notifTargetHoursOverride.subscribe(v => notifTargetHoursLocal = v)
 
   async function toggleNotif(store, localSetter, newValue) {
+    localSetter(newValue)  // apply immediately so the settings row appears
     if (newValue) {
       const granted = await requestNotificationPermission()
-      if (!granted) { showToast('Notification permission denied', 'error'); return }
+      if (!granted) showToast('Grant notification permission in system settings', 'error')
     }
-    localSetter(newValue)
   }
 
   let use24Local = true
