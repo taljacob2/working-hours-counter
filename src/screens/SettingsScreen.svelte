@@ -604,6 +604,11 @@
     <!-- Notifications -->
     <hr class="divider" />
     <p class="section-title">Notifications</p>
+    {#if !window?.Capacitor?.isNativePlatform?.()}
+      <p class="info-text" style="margin-bottom: 0.75rem; font-size: 0.78rem;">
+        Notifications only fire on the Android app. Settings saved here sync via Supabase and take effect next time the app opens.
+      </p>
+    {/if}
 
       <!-- Morning check-in reminder -->
       <div class="notif-row">
