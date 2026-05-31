@@ -172,7 +172,6 @@
 
   /* Metric cards */
   .metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
-  @media (max-width: 540px) { .metrics-row { grid-template-columns: 1fr; } }
   .metric-card {
     background: var(--color-surface); border: 1px solid var(--color-border);
     border-radius: var(--radius-md); padding: 1rem 1.25rem;
@@ -196,7 +195,6 @@
 
   /* Platform cards */
   .platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 540px) { .platforms { grid-template-columns: 1fr; } }
   .platform-card {
     background: var(--color-surface); border: 1.5px solid var(--color-border);
     border-radius: var(--radius-md); padding: 1.25rem;
@@ -229,4 +227,28 @@
   .pause-btn:hover:not(:disabled) { background: var(--color-ot-neg-subtle); color: var(--color-ot-neg); border-color: var(--color-ot-neg); }
   .pause-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .action-btn.active { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent); }
+
+  /* ── Mobile compact layout ── */
+  @media (max-width: 540px) {
+    .main-screen  { padding: 0.625rem; gap: 0.75rem; }
+    .section      { gap: 0.5rem; }
+
+    /* Keep 3-column grid, shrink cards */
+    .metrics-row  { gap: 0.375rem; }
+    .metric-card  { padding: 0.55rem 0.4rem; gap: 0.15rem; }
+    .metric-value { font-size: 1.15rem; }
+    .metric-label { font-size: 0.58rem; letter-spacing: 0.02em; }
+    .ot-hint      { display: none; }
+
+    /* Banner is redundant with the card — hide it */
+    .ot-banner    { display: none; }
+
+    /* Keep 2-column platform grid, shrink cards */
+    .platforms     { gap: 0.5rem; }
+    .platform-card { padding: 0.75rem 0.625rem; gap: 0.5rem; }
+    .platform-icon { font-size: 1rem; }
+    .platform-name { font-size: 0.8125rem; }
+    .platform-net  { font-size: 1.4rem; }
+    .action-btn    { min-height: 38px; font-size: 0.75rem; padding: 0.3rem 0.4rem; }
+  }
 </style>
