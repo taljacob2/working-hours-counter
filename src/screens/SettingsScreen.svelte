@@ -770,6 +770,8 @@
       Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave a saved location.
       {#if !window?.Capacitor?.isNativePlatform?.()}
         <br><em>On web this only works while the page is open. Install the Android app for true background tracking.</em>
+      {:else}
+        <br><em>When prompted for location, choose <strong>"Allow all the time"</strong> — "While using the app" prevents background tracking.</em>
       {/if}
     </p>
 

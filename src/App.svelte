@@ -40,7 +40,6 @@
     user.set(session.user)
     await loadAll(sb)
     screen.set('main')
-    startGeoFence()
     scheduleNotifications()
   })
 
