@@ -301,13 +301,13 @@
   autoTrackEnabled.subscribe(v => autoTrackLocal = v)
 
   let officeRadiusLocal = 200
-  let resumeThresholdLocal = 2
-  let pauseThresholdLocal = 2
+  let resumeThresholdLocal = 0.25
+  let pauseThresholdLocal = 0.25
   $: activeLocLocal = officeLocsLocal.find(l => l.id === activeOfficeIdLocal) ?? null
   $: if (activeLocLocal) {
     officeRadiusLocal = activeLocLocal.radiusMeters
-    resumeThresholdLocal = activeLocLocal.resumeThresholdHours ?? 2
-    pauseThresholdLocal  = activeLocLocal.pauseThresholdHours  ?? 2
+    resumeThresholdLocal = activeLocLocal.resumeThresholdHours ?? 0.25
+    pauseThresholdLocal  = activeLocLocal.pauseThresholdHours  ?? 0.25
   }
 
   let newLocName = ''
@@ -321,7 +321,7 @@
         addingLocation = false
         const id = crypto.randomUUID()
         const name = newLocName.trim() || 'Office'
-        const loc = { id, name, lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: 200, resumeThresholdHours: 2, pauseThresholdHours: 2 }
+        const loc = { id, name, lat: pos.coords.latitude, lng: pos.coords.longitude, radiusMeters: 200, resumeThresholdHours: 0.25, pauseThresholdHours: 0.25 }
         newLocName = ''
         await saveLocations([...officeLocsLocal, loc], id, true)
         showToast(`Added "${loc.name}"`, 'success')

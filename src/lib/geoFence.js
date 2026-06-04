@@ -41,13 +41,15 @@ export class GeoFenceWatcher {
   #hysteresisTimer = null
   #enterThresholdMs       // ms inside required before onEnter fires
   #leaveThresholdMs       // ms outside required before onLeave fires
+  #fireOnInitialInside    // if true and first fix is inside, fire onEnter immediately
 
-  constructor({ location, onEnter, onLeave, enterThresholdMs = 7_200_000, leaveThresholdMs = 7_200_000 }) {
+  constructor({ location, onEnter, onLeave, enterThresholdMs = 900_000, leaveThresholdMs = 900_000, fireOnInitialInside = false }) {
     this.#location = location
     this.#onEnter = onEnter
     this.#onLeave = onLeave
     this.#enterThresholdMs = enterThresholdMs
     this.#leaveThresholdMs = leaveThresholdMs
+    this.#fireOnInitialInside = fireOnInitialInside
   }
 
   async start() {
@@ -122,10 +124,13 @@ export class GeoFenceWatcher {
     const dist = haversineMetres(lat, lng, this.#location.lat, this.#location.lng)
     const nowInside = dist <= this.#location.radiusMeters
 
-    // On first position fix, silently initialize state without firing any callback.
-    // We have no knowledge of prior confirmed state, so don't synthesize an onLeave.
+    // On first position fix, initialize confirmed state.
+    // If fireOnInitialInside is set and we're already inside, fire onEnter immediately
+    // (handles the case where the app opens while the user is already at the office).
+    // Never fire onLeave on first fix — we have no prior confirmed state to leave from.
     if (this.#insideOffice === null) {
       this.#insideOffice = nowInside
+      if (nowInside && this.#fireOnInitialInside) this.#onEnter(new Date())
       return
     }
 

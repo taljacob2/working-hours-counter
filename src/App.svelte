@@ -54,8 +54,9 @@
 
     geoWatcher = new GeoFenceWatcher({
       location: loc,
-      enterThresholdMs: (loc.resumeThresholdHours ?? 2) * 3_600_000,
-      leaveThresholdMs: (loc.pauseThresholdHours  ?? 2) * 3_600_000,
+      enterThresholdMs: (loc.resumeThresholdHours ?? 0.25) * 3_600_000,
+      leaveThresholdMs: (loc.pauseThresholdHours  ?? 0.25) * 3_600_000,
+      fireOnInitialInside: true,
       onEnter: crossedAt => pressOffice('resume', crossedAt),
       onLeave: crossedAt => pressOffice('pause',  crossedAt),
     })
