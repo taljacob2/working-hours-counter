@@ -18,6 +18,7 @@
   $: minMs = $minimumDailyHours * 3_600_000
   $: todayIsOffDay = isOffDay(todayKey, $offDays, $dayOverrides)
   $: todayOtMs = todayIsOffDay ? todayNetMs : todayNetMs - reqMs
+  $: todayHasStarted = todayLogs.some(l => l.action === 'resume')
 
   $: thisYear  = now.getFullYear()
   $: thisMonth = now.getMonth() + 1
@@ -45,13 +46,16 @@
 
   // "Leave by" — normal (required hours)
   $: leaveByDisplay = (() => {
-    if (todayIsOffDay) return { value: '—', done: false }
-    if (todayNetMs >= reqMs) return { value: 'Done ✓', done: true }
-    const leaveAt = new Date(now.getTime() + (reqMs - todayNetMs))
+    if (todayIsOffDay) return { value: '—', hint: null, done: false }
+    if (!todayHasStarted) return { value: '—', hint: 'Clock in to start', done: false }
+    if (todayNetMs >= reqMs) return { value: 'Done ✓', hint: null, done: true }
+    const remainMs = reqMs - todayNetMs
+    const leaveAt = new Date(now.getTime() + remainMs)
     return {
       value: leaveAt.toLocaleTimeString([], {
         hour: '2-digit', minute: '2-digit', hour12: !$use24HourFormat,
       }),
+      hint: fmtDuration(remainMs) + ' left',
       done: false,
     }
   })()
@@ -62,9 +66,10 @@
   $: otAdjustedTarget = Math.max(minMs, reqMs - cumOtMs)
 
   $: otLeaveByDisplay = (() => {
-    if (todayIsOffDay || otAdjustedTarget === reqMs) return null
+    if (todayIsOffDay || otAdjustedTarget === reqMs || !todayHasStarted) return null
     if (todayNetMs >= otAdjustedTarget) return { value: 'Done ✓', done: true }
-    const leaveAt = new Date(now.getTime() + (otAdjustedTarget - todayNetMs))
+    const remainMs = otAdjustedTarget - todayNetMs
+    const leaveAt = new Date(now.getTime() + remainMs)
     return {
       value: leaveAt.toLocaleTimeString([], {
         hour: '2-digit', minute: '2-digit', hour12: !$use24HourFormat,
@@ -132,6 +137,9 @@
       <div class="metric-card" class:leave-done={leaveByDisplay.done}>
         <span class="metric-label">Leave by</span>
         <span class="metric-value tabnum">{leaveByDisplay.value}</span>
+        {#if leaveByDisplay.hint}
+          <span class="ot-hint">{leaveByDisplay.hint}</span>
+        {/if}
         {#if otLeaveByDisplay}
           <span class="ot-leave-hint" class:ot-done={otLeaveByDisplay.done}>
             ⚡ {otLeaveByDisplay.value}
