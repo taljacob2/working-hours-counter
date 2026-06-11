@@ -29,6 +29,9 @@
     }, 0)
   })()
   $: cumOtMs = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours, $offDays, $dayOverrides)
+  // OT from completed days only — used for the "leave by OT" target so it doesn't
+  // drift as today's still-in-progress OT (which starts at -reqMs) is added in.
+  $: cumOtMsCompleted = monthCumulativeOtMs($logs, thisYear, thisMonth, $requiredHours, $offDays, $dayOverrides, false)
 
   // Avg logged hours per worked day this month
   $: avgDailyMs = (() => {
@@ -58,10 +61,10 @@
     }
   })()
 
-  // "Leave by OT" — required hours adjusted by this month's cumulative OT,
+  // "Leave by OT" — required hours adjusted by OT banked from completed days,
   // clamped so it never goes below minimumDailyHours.
   // Positive OT → you can leave earlier. Negative OT → you need to stay later.
-  $: otAdjustedTarget = Math.max(minMs, reqMs - cumOtMs)
+  $: otAdjustedTarget = Math.max(minMs, reqMs - cumOtMsCompleted)
 
   $: otLeaveByDisplay = (() => {
     if (todayIsOffDay || otAdjustedTarget === reqMs) return null

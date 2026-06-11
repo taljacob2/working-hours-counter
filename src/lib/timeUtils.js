@@ -83,11 +83,14 @@ export function loggedDaysInMonth(logs, year, month) {
  * Compute cumulative OT for a month.
  * Only days that have at least one log and are <= today count.
  * Off days (by day-of-week) count all logged hours as pure OT (no required deduction).
+ *
+ * @param {boolean} includeToday - If false, today's still-in-progress OT is excluded so
+ *   the total only reflects fully completed days. Defaults to true.
  */
-export function monthCumulativeOtMs(logs, year, month, requiredHoursPerDay, offDays = [], dayOverrides = {}) {
+export function monthCumulativeOtMs(logs, year, month, requiredHoursPerDay, offDays = [], dayOverrides = {}, includeToday = true) {
   const reqMs = requiredHoursPerDay * 3_600_000
   const todayKey = dateKey()
-  const days = loggedDaysInMonth(logs, year, month).filter(k => k <= todayKey)
+  const days = loggedDaysInMonth(logs, year, month).filter(k => includeToday ? k <= todayKey : k < todayKey)
   let total = 0
   for (const dk of days) {
     const dayLogs = logs.filter(l => l.date_key === dk).sort(byTs)
