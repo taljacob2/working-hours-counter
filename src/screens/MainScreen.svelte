@@ -82,6 +82,8 @@
   // OT tick position on the bar (% of reqMs width); hidden if beyond bar
   $: otTickPct   = reqMs > 0 ? (otAdjustedTarget / reqMs) * 100 : 0
   $: showOtTick  = otLeaveByDisplay !== null && otTickPct < 99.5
+  // Label position is clamped so the duration text doesn't overflow the bar's edges
+  $: otLabelPct  = Math.min(92, Math.max(8, otTickPct))
 
   // ── Platform state ───────────────────────────────────────────
   function platformState(platform, todayLogsArray) {
@@ -164,6 +166,9 @@
         <div class="progress-labels">
           <span class="tabnum">{fmtDuration(todayNetMs)}</span>
           <span class="tabnum">{fmtDuration(reqMs)} target</span>
+          {#if showOtTick}
+            <span class="tabnum progress-ot-label" style="left: {otLabelPct.toFixed(1)}%">{fmtDuration(otAdjustedTarget)}</span>
+          {/if}
         </div>
       </div>
     {/if}
@@ -331,8 +336,14 @@
     transform: translate(-50%, -50%) rotate(45deg);
   }
   .progress-labels {
-    display: flex; justify-content: space-between;
+    position: relative; display: flex; justify-content: space-between;
     font-size: 0.72rem; color: var(--color-text-muted);
+  }
+  .progress-ot-label {
+    position: absolute; top: 0;
+    transform: translateX(-50%);
+    font-weight: 600; color: var(--color-primary);
+    white-space: nowrap; pointer-events: none;
   }
 
   /* ── Mobile compact layout ── */
