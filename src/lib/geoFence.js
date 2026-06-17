@@ -99,7 +99,10 @@ export class GeoFenceWatcher {
         },
         (position, error) => {
           if (error || !position) return
-          this.#handlePosition(position.latitude, position.longitude)
+          // Use the GPS fix time so crossing timestamps are accurate even when
+          // multiple callbacks arrive in a batch after being backgrounded.
+          const fixTime = position.time ? new Date(position.time) : new Date()
+          this.#handlePosition(position.latitude, position.longitude, fixTime)
         }
       )
     } catch (e) {
@@ -112,14 +115,14 @@ export class GeoFenceWatcher {
   #startWeb() {
     if (!navigator?.geolocation) return
     this.#watchId = navigator.geolocation.watchPosition(
-      pos => this.#handlePosition(pos.coords.latitude, pos.coords.longitude),
+      pos => this.#handlePosition(pos.coords.latitude, pos.coords.longitude, new Date(pos.timestamp)),
       err => console.warn('[GeoFence] Web geolocation error:', err),
       { enableHighAccuracy: true, maximumAge: 15_000 }
     )
   }
 
   // ── Shared position handler ───────────────────────────────────
-  #handlePosition(lat, lng) {
+  #handlePosition(lat, lng, fixTime = new Date()) {
     if (!this.#location) return
     const dist = haversineMetres(lat, lng, this.#location.lat, this.#location.lng)
     const nowInside = dist <= this.#location.radiusMeters
@@ -130,7 +133,7 @@ export class GeoFenceWatcher {
     // Never fire onLeave on first fix — we have no prior confirmed state to leave from.
     if (this.#insideOffice === null) {
       this.#insideOffice = nowInside
-      if (nowInside && this.#fireOnInitialInside) this.#onEnter(new Date())
+      if (nowInside && this.#fireOnInitialInside) this.#onEnter(fixTime)
       return
     }
 
@@ -164,7 +167,7 @@ export class GeoFenceWatcher {
     // New transition direction — record crossing time, start threshold timer
     if (this.#hysteresisTimer) clearTimeout(this.#hysteresisTimer)
     this.#pendingInside = nowInside
-    this.#pendingCrossedAt = new Date()
+    this.#pendingCrossedAt = fixTime
     const threshold = nowInside ? this.#enterThresholdMs : this.#leaveThresholdMs
     this.#hysteresisTimer = setTimeout(() => {
       this.#hysteresisTimer = null
