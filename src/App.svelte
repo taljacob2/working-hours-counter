@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours, fillMissingOfficeHours } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -203,6 +203,9 @@
 
       const echh = settings?.find(s => s.key === 'excelColorHomeHours')?.value
       excelColorHomeHours.set((echh ?? localStorage.getItem('whl_excel_color_home') ?? 'false') === 'true')
+
+      const fmoh = settings?.find(s => s.key === 'fillMissingOfficeHours')?.value
+      fillMissingOfficeHours.set((fmoh ?? localStorage.getItem('whl_fill_missing_office') ?? 'true') === 'true')
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

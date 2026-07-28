@@ -19,7 +19,7 @@ export default defineConfig({
             req.on('data', chunk => { body += chunk })
             req.on('end', () => {
               try {
-                const { xlsBase64, logs, colorHomeHours, dayOverrides } = JSON.parse(body)
+                const { xlsBase64, logs, colorHomeHours, dayOverrides, fillMissingOffice } = JSON.parse(body)
                 if (!xlsBase64 || !logs) {
                   res.statusCode = 400
                   res.setHeader('Content-Type', 'application/json')
@@ -27,6 +27,7 @@ export default defineConfig({
                   return
                 }
                 const colorHomeHoursArg = colorHomeHours === true ? 'true' : 'false'
+                const fillMissingOfficeArg = fillMissingOffice === false ? 'false' : 'true'
 
                 const id = Math.random().toString(36).substring(7)
                 const tempIn = `_temp_in_${id}.xls`
@@ -38,7 +39,7 @@ export default defineConfig({
                 writeFileSync(tempLogs, JSON.stringify(logs))
                 writeFileSync(tempOverrides, JSON.stringify(dayOverrides && typeof dayOverrides === 'object' ? dayOverrides : {}))
 
-                exec(`python merge_hours.py "${tempIn}" "${tempLogs}" "${tempOut}" ${colorHomeHoursArg} "${tempOverrides}"`, (error, stdout, stderr) => {
+                exec(`python merge_hours.py "${tempIn}" "${tempLogs}" "${tempOut}" ${colorHomeHoursArg} "${tempOverrides}" ${fillMissingOfficeArg}`, (error, stdout, stderr) => {
                   const cleanup = () => {
                     try { if (existsSync(tempIn)) unlinkSync(tempIn) } catch(e){}
                     try { if (existsSync(tempLogs)) unlinkSync(tempLogs) } catch(e){}

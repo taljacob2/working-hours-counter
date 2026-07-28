@@ -15,6 +15,8 @@ COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime
 COLOUR_NEGATIVE = 10  # Red         — deficit
 COLOUR_VACATION = 12  # Blue        — vacation (חופש)
 COLOUR_HOME     = 49  # Teal/Cyan   — optional colour for inserted home intervals
+COLOUR_OFFICE_GAP = 46  # Orange     — office hours backfilled from the app, not yet
+                        # confirmed by the company's own attendance system
 
 
 def font_colour_at(rb, sheet, row, col):
@@ -258,6 +260,12 @@ def parse_xls_time(val):
         return time_str_to_float(val)
     return None
 
+def float_to_time_str(frac):
+    """Inverse of time_str_to_float: a fraction-of-day back to an 'HH:MM' string."""
+    total_minutes = int(round(frac * 24 * 60)) % (24 * 60)
+    h, m = divmod(total_minutes, 60)
+    return f"{h:02d}:{m:02d}"
+
 def parse_diff_str(s):
     if not s or not isinstance(s, str):
         return 0
@@ -283,7 +291,8 @@ def is_off_day(day_name):
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> [color_home_hours] [day_overrides_json]")
+        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> "
+              "[color_home_hours] [day_overrides_json] [fill_missing_office]")
         sys.exit(1)
 
     input_xls_path = sys.argv[1]
@@ -304,6 +313,13 @@ def main():
         except Exception as e:
             print(f"Error loading day overrides JSON: {e}")
             day_overrides = {}
+
+    # Whether to backfill an office session the app recorded but the company's own
+    # file never got around to detailing. Defaults to on (matches the in-app
+    # toggle's default) so a bare CLI invocation without this arg still does it.
+    fill_missing_office = True
+    if len(sys.argv) > 6:
+        fill_missing_office = sys.argv[6].strip().lower() == 'true'
 
     if not os.path.exists(input_xls_path):
         print(f"Input file not found: {input_xls_path}")
@@ -440,43 +456,113 @@ def main():
             sheet_write.write(r, 2, '', row_style(r, 2))
 
         # Non-vacation day: process intervals
-        # Read existing Office intervals
-        xls_intervals = []
+        # Read existing Office intervals. Detect which of the 3 slots are genuinely
+        # occupied by keying on slot index rather than assuming they're filled
+        # compactly from slot 0 — the company's sheet can leave a gap (e.g. slot 1
+        # filled, slot 0 blank), and treating "count of filled slots" as "next free
+        # slot" would silently overwrite real office data sitting in a later slot.
+        occupied = {}  # slot index (0, 1, 2) -> (ent, ex) float tuple
         for p in range(3):
             ent_val = sheet_read.cell_value(r, 2 + 2*p)
             ex_val = sheet_read.cell_value(r, 3 + 2*p)
             ent = parse_xls_time(ent_val)
             ex = parse_xls_time(ex_val)
             if ent is not None and ex is not None:
-                xls_intervals.append((ent, ex))
+                occupied[p] = (ent, ex)
 
-        # Read Home intervals for this day from JSON
-        day_home_logs = logs_by_date.get(date_str, [])
-        # Sort home logs by start time
-        day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
-        
-        # Merge home intervals — same font/size as office cells;
-        # colour is optionally overridden to COLOUR_HOME per user setting.
-        curr_p = len(xls_intervals)
-        for log in day_home_logs:
-            if curr_p < 3:
-                start_str = log.get("start")
-                end_str = log.get("end")
-                if start_str and end_str:
-                    col_ent = 2 + 2 * curr_p
-                    col_ex = 3 + 2 * curr_p
-                    ent_style = row_style(r, col_ent)
-                    ex_style = row_style(r, col_ex)
-                    if color_home_hours:
-                        ent_style = style_with_colour(ent_style, COLOUR_HOME)
-                        ex_style = style_with_colour(ex_style, COLOUR_HOME)
-                    sheet_write.write(r, col_ent, start_str, ent_style)
-                    sheet_write.write(r, col_ex,  end_str,   ex_style)
+        free_slots = [p for p in range(3) if p not in occupied]
+        # Whole-day check: did the company's own file have ANY real time entry for
+        # this day at all, before we touched anything? If so, we leave office
+        # backfill alone entirely — even a different/partial session recorded by
+        # them means we don't try to reconcile or duplicate what they already have.
+        company_had_any_data = len(occupied) > 0
 
-                    ent_f = time_str_to_float(start_str)
-                    ex_f = time_str_to_float(end_str)
-                    xls_intervals.append((ent_f, ex_f))
-                    curr_p += 1
+        # Read this day's app logs, split by platform.
+        day_logs_all = logs_by_date.get(date_str, [])
+        day_home_logs = sorted(
+            (log for log in day_logs_all if log.get("platform") == "home" and log.get("start") and log.get("end")),
+            key=lambda x: x["start"]
+        )
+        day_office_logs = sorted(
+            (log for log in day_logs_all if log.get("platform") == "office" and log.get("start") and log.get("end")),
+            key=lambda x: x["start"]
+        )
+
+        # Candidates to merge into free slots, in chronological order. Home logs
+        # are always eligible. Office logs are only eligible when the company's
+        # sheet has nothing at all for this day (fill_missing_office) — a
+        # self-reported office session that isn't yet in the official record,
+        # flagged with a distinct colour so HR notices and can confirm it.
+        candidates = [dict(log, _source="home") for log in day_home_logs]
+        if fill_missing_office and not company_had_any_data:
+            candidates += [dict(log, _source="office_backfill") for log in day_office_logs]
+        candidates.sort(key=lambda x: x["start"])
+
+        # Fill only the genuinely-free slots, in chronological order — never the
+        # company's own occupied ones. Track which slots we personally wrote (and
+        # their source) so overflow below can only ever extend our own data, never
+        # a slot the company already filled.
+        self_filled_source = {}  # slot index -> "home" | "office_backfill"
+        placed_count = min(len(free_slots), len(candidates))
+
+        def write_slot(p, start_str, end_str, source):
+            col_ent = 2 + 2 * p
+            col_ex = 3 + 2 * p
+            ent_style = row_style(r, col_ent)
+            ex_style = row_style(r, col_ex)
+            if source == "office_backfill":
+                ent_style = style_with_colour(ent_style, COLOUR_OFFICE_GAP)
+                ex_style = style_with_colour(ex_style, COLOUR_OFFICE_GAP)
+            elif color_home_hours:
+                ent_style = style_with_colour(ent_style, COLOUR_HOME)
+                ex_style = style_with_colour(ex_style, COLOUR_HOME)
+            sheet_write.write(r, col_ent, start_str, ent_style)
+            sheet_write.write(r, col_ex,  end_str,   ex_style)
+            occupied[p] = (time_str_to_float(start_str), time_str_to_float(end_str))
+            self_filled_source[p] = source
+
+        for i in range(placed_count):
+            p = free_slots[i]
+            log = candidates[i]
+            write_slot(p, log["start"], log["end"], log["_source"])
+
+        # Overflow: more real work intervals than the sheet's fixed 3 entry/exit
+        # slots can show (e.g. several short fragmented home sessions on a fast
+        # day, or a home + backfilled-office day that's already full). The sheet
+        # has no room for a 4th column pair, so each overflow session's duration
+        # is folded into the boundary of whichever slot we ourselves just wrote
+        # that sits closest to it in time — extending that slot's displayed entry
+        # or exit to actually cover the extra minutes. This keeps every minute in
+        # the day's total physically present in a visible cell (nothing is added
+        # to the total that isn't backed by a shown log time), and never touches
+        # a slot holding the company's own pre-existing data.
+        for log in candidates[placed_count:]:
+            ov_start = time_str_to_float(log["start"])
+            ov_end   = time_str_to_float(log["end"])
+            ov_dur   = ov_end - ov_start
+            if ov_dur <= 0 or not self_filled_source:
+                continue
+
+            attach_candidates = []  # (gap, slot, extend_forward)
+            for p in self_filled_source:
+                s_ent, s_ex = occupied[p]
+                if ov_start >= s_ex:
+                    attach_candidates.append((ov_start - s_ex, p, True))
+                if ov_end <= s_ent:
+                    attach_candidates.append((s_ent - ov_end, p, False))
+            if not attach_candidates:
+                # Overflow session's time overlaps the span of our own slots in a
+                # way with no clean chronological attachment point — skip rather
+                # than fabricate an inverted or overlapping time.
+                continue
+
+            attach_candidates.sort(key=lambda c: c[0])
+            _, best_p, extend_forward = attach_candidates[0]
+            s_ent, s_ex = occupied[best_p]
+            new_ent, new_ex = (s_ent, s_ex + ov_dur) if extend_forward else (s_ent - ov_dur, s_ex)
+            write_slot(best_p, float_to_time_str(new_ent), float_to_time_str(new_ex), self_filled_source[best_p])
+
+        xls_intervals = list(occupied.values())
 
         # Calculate daily totals
         net_total = sum(ex - ent for ent, ex in xls_intervals)
