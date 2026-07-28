@@ -4,10 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync-py": "node scripts/sync-py.mjs",
+    "predev": "npm run sync-py",
     "dev": "vite",
+    "prebuild": "npm run sync-py",
     "build": "vite build",
     "preview": "vite preview",
-    "predeploy": "vite build",
+    "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },
   "devDependencies": {
@@ -23,6 +26,7 @@
     "@capacitor/local-notifications": "^8.2.0",
     "@capgo/background-geolocation": "^8.0.35",
     "@supabase/supabase-js": "^2.105.3",
-    "gh-pages": "^6.3.0"
+    "gh-pages": "^6.3.0",
+    "pyodide": "^314.0.3"
   }
 }

@@ -1,6 +1,9 @@
 <script>
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours, requiredHours } from '../stores/appStore.js'
   import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
+  import { generateXls, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+
+  warmUpPyodide()
 
   // Metadata is passed in from SettingsScreen's own (possibly-unsaved) local
   // fields, so this works immediately without requiring a separate Save step.
@@ -29,7 +32,12 @@
   async function handleGenerate() {
     if (!canGenerate) return
     loading.set(true)
-    showToast('יוצר דוח שעות...', 'info')
+    showToast(
+      isPyodideReady()
+        ? 'יוצר דוח שעות...'
+        : 'מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...',
+      'info'
+    )
 
     try {
       const targetYear = $calCursor.getFullYear()
@@ -52,22 +60,9 @@
         dayOverrides: $dayOverrides,
       }
 
-      const res = await fetch('/api/generate-xls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config, logs: allIntervals }),
-      })
-
-      if (!res.ok) {
-        let errMsg = 'שגיאת שרת לא ידועה'
-        try {
-          const errJson = await res.json()
-          errMsg = errJson.error || errMsg
-        } catch {}
-        throw new Error(errMsg)
-      }
-
-      const blob = await res.blob()
+      // Generated entirely client-side via Pyodide — no server involved, so
+      // this works the same on GitHub Pages as locally.
+      const blob = await generateXls(config, allIntervals)
       const downloadUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = downloadUrl
