@@ -444,15 +444,34 @@ def main():
         if is_vac:
             vacation_days_count += 1
             days_worked_count += 1 # Vacation counts as active work/vacation day in Col 11
-            # Keep original values for vacation day; (re-)write col 2 in blue to mark it
+
+            # The app's override is authoritative for a חופש day — overwrite the
+            # entire row to match the company template's own vacation-day pattern
+            # (see e.g. row 06/07 in a real export: 'חופש' | - | *08:00 | *17:00 |
+            # - | - | - | 9:00 | | | | 9:00 | ), rather than leaving behind
+            # whatever this row previously held (real entry/exit times, a
+            # deficit, etc.) from before it was marked off.
+            vac_day_f = 9.0 / 24.0
             vac_st = style_with_colour(row_style(r, 2), colour_vac)
-            sheet_write.write(r, 2, 'חופש', vac_st)
-            reg_val = sheet_read.cell_value(r, 9)
-            daily_regular_vals.append(reg_val)
-            daily_125_vals.append(sheet_read.cell_value(r, 10))
-            daily_150_vals.append(sheet_read.cell_value(r, 11))
-            daily_200_vals.append(sheet_read.cell_value(r, 12))
-            daily_total_vals.append(sheet_read.cell_value(r, 13))
+            sheet_write.write(r, 2, 'חופש',  vac_st)
+            sheet_write.write(r, 3, '-',      row_style(r, 3))
+            sheet_write.write(r, 4, '*08:00', row_style(r, 4))
+            sheet_write.write(r, 5, '*17:00', row_style(r, 5))
+            sheet_write.write(r, 6, '-',      row_style(r, 6))
+            sheet_write.write(r, 7, '-',      row_style(r, 7))
+            sheet_write.write(r, 8, '-',      row_style(r, 8))
+            sheet_write.write(r,  9, vac_day_f, hour_style(r, 9))
+            sheet_write.write(r, 10, '',        row_style(r, 10))
+            sheet_write.write(r, 11, '',        row_style(r, 11))
+            sheet_write.write(r, 12, '',        row_style(r, 12))
+            sheet_write.write(r, 13, vac_day_f, hour_style(r, 13))
+            sheet_write.write(r, 14, '',        row_style(r, 14))
+
+            daily_regular_vals.append(vac_day_f)
+            daily_125_vals.append('')
+            daily_150_vals.append('')
+            daily_200_vals.append('')
+            daily_total_vals.append(vac_day_f)
 
             if not is_off_day(day_name):
                 standard_weekdays_count += 1
