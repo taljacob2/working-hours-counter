@@ -9,12 +9,60 @@ import re
 
 
 # ── Cell colour constants (xlwt colour_index from the standard palette) ──────
-# These match the colours used by Excel for positive/negative/special cells.
-COLOUR_DEFAULT  = 8   # Black  — original cell colour
-COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime days
-COLOUR_NEGATIVE = 10  # Red         — deficit days
-COLOUR_VACATION = 12  # Blue        — vacation (חופש) entries
-COLOUR_HOME     = 49  # Teal/Cyan   — home-hours intervals we insert
+# Defaults for JBClock-style sheets; overridden per workbook by detect_colours().
+COLOUR_DEFAULT  = 8   # Black       — regular office / data cells
+COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime
+COLOUR_NEGATIVE = 10  # Red         — deficit
+COLOUR_VACATION = 12  # Blue        — vacation (חופש)
+
+
+def font_colour_at(rb, sheet, row, col):
+    """Return the font colour_index for a cell, or COLOUR_DEFAULT on failure."""
+    try:
+        xf_idx = sheet.cell_xf_index(row, col)
+        xf = rb.xf_list[xf_idx]
+        return rb.font_list[xf.font_index].colour_index
+    except Exception:
+        return COLOUR_DEFAULT
+
+
+def detect_colours(rb, sheet):
+    """Learn red/green/blue indices from already-formatted cells in the template."""
+    positive = COLOUR_POSITIVE
+    negative = COLOUR_NEGATIVE
+    vacation = COLOUR_VACATION
+
+    for r in range(6, sheet.nrows):
+        if sheet.cell_value(r, 2) == 'חופש':
+            ci = font_colour_at(rb, sheet, r, 2)
+            if ci not in (COLOUR_DEFAULT, 0):
+                vacation = ci
+
+        val = sheet.cell_value(r, 14)
+        if isinstance(val, str):
+            s = val.strip()
+            ci = font_colour_at(rb, sheet, r, 14)
+            if ci not in (COLOUR_DEFAULT, 0):
+                if s.startswith('+'):
+                    positive = ci
+                elif s.startswith('-'):
+                    negative = ci
+
+    for r in range(41, min(sheet.nrows, 56)):
+        for c in (6, 14):
+            val = sheet.cell_value(r, c)
+            if val in ('', None):
+                continue
+            s = str(val).strip()
+            ci = font_colour_at(rb, sheet, r, c)
+            if ci in (COLOUR_DEFAULT, 0):
+                continue
+            if s.startswith('+'):
+                positive = ci
+            elif s.startswith('-'):
+                negative = ci
+
+    return positive, negative, vacation
 
 
 def style_with_colour(base_style, colour_index):
@@ -216,6 +264,8 @@ def main():
     wb = xlutils.copy.copy(rb)
     sheet_write = wb.get_sheet(0)
 
+    colour_pos, colour_neg, colour_vac = detect_colours(rb, sheet_read)
+
     # Build a per-row style cache (keyed by row index).
     # We read the XF from column 1 (the date column) of each row;
     # all data cells in that row share the same formatting.
@@ -276,7 +326,7 @@ def main():
             vacation_days_count += 1
             days_worked_count += 1 # Vacation counts as active work/vacation day in Col 11
             # Keep original values for vacation day; re-write col 2 in blue to mark it
-            vac_st = style_with_colour(row_style(r, 2), COLOUR_VACATION)
+            vac_st = style_with_colour(row_style(r, 2), colour_vac)
             sheet_write.write(r, 2, 'חופש', vac_st)
             reg_val = sheet_read.cell_value(r, 9)
             daily_regular_vals.append(reg_val)
@@ -307,7 +357,7 @@ def main():
         # Sort home logs by start time
         day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
         
-        # Merge home intervals into sheet (written in teal to distinguish from office hours)
+        # Merge home intervals — same font/size as office cells (default colour)
         curr_p = len(xls_intervals)
         for log in day_home_logs:
             if curr_p < 3:
@@ -316,9 +366,8 @@ def main():
                 if start_str and end_str:
                     col_ent = 2 + 2 * curr_p
                     col_ex = 3 + 2 * curr_p
-                    home_st = style_with_colour(row_style(r, col_ent), COLOUR_HOME)
-                    sheet_write.write(r, col_ent, start_str, home_st)
-                    sheet_write.write(r, col_ex,  end_str,   home_st)
+                    sheet_write.write(r, col_ent, start_str, row_style(r, col_ent))
+                    sheet_write.write(r, col_ex,  end_str,   row_style(r, col_ex))
 
                     ent_f = time_str_to_float(start_str)
                     ex_f = time_str_to_float(end_str)
@@ -342,7 +391,7 @@ def main():
 
             if not is_off_day(day_name):
                 # Deficit day — write -09:00 in red
-                neg_st = style_with_colour(row_style(r, 14), COLOUR_NEGATIVE)
+                neg_st = style_with_colour(row_style(r, 14), colour_neg)
                 sheet_write.write(r, 14, '-09:00', neg_st)
                 total_deficit_minutes += 9 * 60
             else:
@@ -369,7 +418,7 @@ def main():
 
             mins = int(round(total_hours * 60))
             # Weekend overtime → always positive, shown in green
-            pos_st = style_with_colour(row_style(r, 14), COLOUR_POSITIVE)
+            pos_st = style_with_colour(row_style(r, 14), colour_pos)
             sheet_write.write(r, 14, f"+{fmt_minutes(mins)}", pos_st)
             total_surplus_minutes += mins
         else:
@@ -400,11 +449,11 @@ def main():
             diff_hours = total_hours - target_hours
             diff_mins  = int(round(diff_hours * 60))
             if diff_mins > 0:
-                pos_st = style_with_colour(row_style(r, 14), COLOUR_POSITIVE)
+                pos_st = style_with_colour(row_style(r, 14), colour_pos)
                 sheet_write.write(r, 14, f"+{fmt_minutes(diff_mins)}", pos_st)
                 total_surplus_minutes += diff_mins
             elif diff_mins < 0:
-                neg_st = style_with_colour(row_style(r, 14), COLOUR_NEGATIVE)
+                neg_st = style_with_colour(row_style(r, 14), colour_neg)
                 sheet_write.write(r, 14, f"-{fmt_minutes(abs(diff_mins))}", neg_st)
                 total_deficit_minutes += abs(diff_mins)
             else:
@@ -458,9 +507,14 @@ def main():
     sum_ot_f = sum_125_f + sum_150_f + sum_200_f
     sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, row_style(52, 6))
 
-    # Row 53 — cumulative deficit shown in red
+    # Row 53 — cumulative deficit (red)
     sheet_write.write(53, 6, f"-{fmt_minutes(total_deficit_minutes)}",
-                      style_with_colour(row_style(53, 6), COLOUR_NEGATIVE))
+                      style_with_colour(row_style(53, 6), colour_neg))
+
+    # Row 54 — cumulative surplus (green), when present in the template
+    if sheet_read.nrows > 54:
+        sheet_write.write(54, 6, f"+{fmt_minutes(total_surplus_minutes)}",
+                          style_with_colour(row_style(54, 6), colour_pos))
 
     # 7. Save workbook
     wb.save(output_xls_path)
