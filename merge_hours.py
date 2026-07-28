@@ -266,6 +266,14 @@ def float_to_time_str(frac):
     h, m = divmod(total_minutes, 60)
     return f"{h:02d}:{m:02d}"
 
+def is_placeholder_time(val):
+    """True for a template default like '*08:00' — the standard nominal shift the
+    company's sheet writes into a חופש day's slot, not a real confirmed time. It
+    parses fine as a float (time_str_to_float strips the '*'), so it must be
+    checked for separately wherever we decide if a slot holds real occupied data.
+    """
+    return isinstance(val, str) and val.strip().startswith('*')
+
 def parse_diff_str(s):
     if not s or not isinstance(s, str):
         return 0
@@ -465,6 +473,14 @@ def main():
         for p in range(3):
             ent_val = sheet_read.cell_value(r, 2 + 2*p)
             ex_val = sheet_read.cell_value(r, 3 + 2*p)
+            if is_placeholder_time(ent_val) or is_placeholder_time(ex_val):
+                # A חופש day's nominal default shift (e.g. '*08:00'/'*17:00'). Once
+                # this day isn't vacation, that placeholder is stale — clear it so
+                # it doesn't sit there colliding with, or block a slot needed by,
+                # the real logged data merged in below.
+                sheet_write.write(r, 2 + 2*p, '', row_style(r, 2 + 2*p))
+                sheet_write.write(r, 3 + 2*p, '', row_style(r, 3 + 2*p))
+                continue
             ent = parse_xls_time(ent_val)
             ex = parse_xls_time(ex_val)
             if ent is not None and ex is not None:
