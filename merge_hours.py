@@ -440,46 +440,66 @@ def main():
             sheet_write.write(r, 2, '', row_style(r, 2))
 
         # Non-vacation day: process intervals
-        # Read existing Office intervals
-        xls_intervals = []
+        # Read existing Office intervals. Detect which of the 3 slots are genuinely
+        # occupied by keying on slot index rather than assuming they're filled
+        # compactly from slot 0 — the company's sheet can leave a gap (e.g. slot 1
+        # filled, slot 0 blank), and treating "count of filled slots" as "next free
+        # slot" would silently overwrite real office data sitting in a later slot.
+        occupied = {}  # slot index (0, 1, 2) -> (ent, ex) float tuple
         for p in range(3):
             ent_val = sheet_read.cell_value(r, 2 + 2*p)
             ex_val = sheet_read.cell_value(r, 3 + 2*p)
             ent = parse_xls_time(ent_val)
             ex = parse_xls_time(ex_val)
             if ent is not None and ex is not None:
-                xls_intervals.append((ent, ex))
+                occupied[p] = (ent, ex)
 
-        # Read Home intervals for this day from JSON
+        free_slots = [p for p in range(3) if p not in occupied]
+
+        # Read Home intervals for this day from JSON, chronologically
         day_home_logs = logs_by_date.get(date_str, [])
-        # Sort home logs by start time
         day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
-        
-        # Merge home intervals — same font/size as office cells;
-        # colour is optionally overridden to COLOUR_HOME per user setting.
-        curr_p = len(xls_intervals)
-        for log in day_home_logs:
-            if curr_p < 3:
-                start_str = log.get("start")
-                end_str = log.get("end")
-                if start_str and end_str:
-                    col_ent = 2 + 2 * curr_p
-                    col_ex = 3 + 2 * curr_p
-                    ent_style = row_style(r, col_ent)
-                    ex_style = row_style(r, col_ex)
-                    if color_home_hours:
-                        ent_style = style_with_colour(ent_style, COLOUR_HOME)
-                        ex_style = style_with_colour(ex_style, COLOUR_HOME)
-                    sheet_write.write(r, col_ent, start_str, ent_style)
-                    sheet_write.write(r, col_ex,  end_str,   ex_style)
+        valid_home_logs = [log for log in day_home_logs if log.get("start") and log.get("end")]
 
-                    ent_f = time_str_to_float(start_str)
-                    ex_f = time_str_to_float(end_str)
-                    xls_intervals.append((ent_f, ex_f))
-                    curr_p += 1
+        # Fill only the genuinely-free slots, in chronological order — never the
+        # company's own occupied ones. Colour is optionally overridden to
+        # COLOUR_HOME per user setting.
+        placed_count = min(len(free_slots), len(valid_home_logs))
+        for i in range(placed_count):
+            p = free_slots[i]
+            log = valid_home_logs[i]
+            start_str = log["start"]
+            end_str = log["end"]
+            col_ent = 2 + 2 * p
+            col_ex = 3 + 2 * p
+            ent_style = row_style(r, col_ent)
+            ex_style = row_style(r, col_ex)
+            if color_home_hours:
+                ent_style = style_with_colour(ent_style, COLOUR_HOME)
+                ex_style = style_with_colour(ex_style, COLOUR_HOME)
+            sheet_write.write(r, col_ent, start_str, ent_style)
+            sheet_write.write(r, col_ex,  end_str,   ex_style)
+            occupied[p] = (time_str_to_float(start_str), time_str_to_float(end_str))
+
+        xls_intervals = list(occupied.values())
+
+        # Overflow: more real work intervals than the sheet's fixed 3 entry/exit
+        # slots can show (e.g. several short fragmented home sessions on a single
+        # day). We never fabricate or stretch a displayed time to absorb this —
+        # doing so would misrepresent when the person actually worked. Instead its
+        # duration is folded straight into the day's total/OT math below, so pay
+        # and overtime stay accurate even though the extra session isn't itemised.
+        overflow_logs = valid_home_logs[placed_count:]
+        overflow_total = sum(
+            time_str_to_float(log["end"]) - time_str_to_float(log["start"])
+            for log in overflow_logs
+        )
+        if overflow_logs:
+            print(f"Note: {date_str} has {len(overflow_logs)} extra home session(s) beyond the "
+                  f"sheet's 3 entry/exit slots; their time is added to the day's total but not itemised.")
 
         # Calculate daily totals
-        net_total = sum(ex - ent for ent, ex in xls_intervals)
+        net_total = sum(ex - ent for ent, ex in xls_intervals) + overflow_total
         
         # Update weekday count
         if not is_off_day(day_name):
