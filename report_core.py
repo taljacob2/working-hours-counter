@@ -340,6 +340,40 @@ def is_off_day(day_name):
     return day_name in ['ו', 'ש']
 
 
+def parse_header(sheet):
+    """Extract employee/company metadata from a company .xls's title rows
+    (0-3), so Settings can be pre-filled instead of retyped. Read-only —
+    never writes anything. Fields that can't be parsed are left as ''."""
+    row0 = str(sheet.cell_value(0, 0) or '')
+    row2 = str(sheet.cell_value(2, 0) or '')
+    row3 = str(sheet.cell_value(3, 0) or '')
+
+    company = re.sub(r'\s*-\s*$', '', row0).strip()
+
+    employee_name = employee_code = card_number = payroll_number = ''
+    m2 = re.match(
+        r'שם עובד\s*:\s*(.+?)\s+קוד עובד:(\S+)\s+מספר כרטיס:(\S+)\s+מס\. בתוכנת שכר:(\S+)',
+        row2,
+    )
+    if m2:
+        employee_name, employee_code, card_number, payroll_number = m2.groups()
+
+    start_date = agreement_text = ''
+    m3 = re.match(r'התחלה:(\S+)\s+הסכם עבודה:(.+)$', row3)
+    if m3:
+        start_date, agreement_text = m3.groups()
+
+    return {
+        'companyName': company,
+        'employeeName': employee_name,
+        'employeeCode': employee_code,
+        'cardNumber': card_number,
+        'payrollNumber': payroll_number,
+        'startDate': start_date,
+        'agreementText': agreement_text,
+    }
+
+
 def load_logs_by_date(path):
     logs_by_date = {}
     if os.path.exists(path):

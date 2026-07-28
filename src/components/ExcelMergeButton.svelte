@@ -2,6 +2,9 @@
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
   import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
+  import { mergeXls, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+
+  warmUpPyodide()
 
   let fileInput
   let uploadEl
@@ -64,8 +67,13 @@
   
   async function processFile(file) {
     loading.set(true)
-    showToast('קורא את קובץ האקסל ומכין את הנתונים...', 'info')
-    
+    showToast(
+      isPyodideReady()
+        ? 'קורא את קובץ האקסל ומכין את הנתונים...'
+        : 'מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...',
+      'info'
+    )
+
     try {
       // 1. Get selected month from calendar cursor
       const targetYear = $calCursor.getFullYear()
@@ -76,70 +84,27 @@
       // day the company's own sheet never detailed — never to override real data.
       const allIntervals = monthLogsAndIntervals([...$logs], targetYear, targetMonth)
 
-      // 3. Read file as ArrayBuffer and convert to Base64
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        try {
-          const arrayBuffer = event.target.result
-          const bytes = new Uint8Array(arrayBuffer)
-          let binary = ''
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i])
-          }
-          const base64 = btoa(binary)
-          
-          // 4. Send to Vite backend merge endpoint
-          // In production/GitHub Pages, this API is missing, so we handle fetch failures gracefully.
-          const res = await fetch('/api/merge-xls', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              xlsBase64: base64,
-              logs: allIntervals,
-              colorHomeHours: colorHomeHoursLocal,
-              dayOverrides: $dayOverrides,
-              fillMissingOffice: fillMissingOfficeLocal
-            })
-          })
-          
-          if (!res.ok) {
-            let errMsg = 'שגיאת שרת לא ידועה'
-            try {
-              const errJson = await res.json()
-              errMsg = errJson.error || errMsg
-            } catch {}
-            throw new Error(errMsg)
-          }
-          
-          // 5. Trigger download of the merged file
-          const blob = await res.blob()
-          const downloadUrl = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = downloadUrl
-          
-          // Formulate clean name e.g. merged_july_2026.xls
-          const origName = file.name.replace(/\.xls$/i, '')
-          a.download = `${origName}_מעודכן.xls`
-          a.click()
-          URL.revokeObjectURL(downloadUrl)
-          
-          showToast('הקובץ מוזג ועודכן בהצלחה!', 'success')
-        } catch (err) {
-          console.error(err)
-          showToast(`מיזוג נכשל: ${err.message}`, 'error')
-        } finally {
-          loading.set(false)
-          if (fileInput) fileInput.value = ''
-        }
-      }
-      
-      reader.readAsArrayBuffer(file)
-      
+      // 3. Read file bytes and merge entirely client-side via Pyodide — no
+      // server involved, so this works the same on GitHub Pages as locally.
+      const xlsBytes = new Uint8Array(await file.arrayBuffer())
+      const blob = await mergeXls(xlsBytes, allIntervals, colorHomeHoursLocal, $dayOverrides, fillMissingOfficeLocal)
+
+      // 4. Trigger download of the merged file
+      const downloadUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = downloadUrl
+
+      // Formulate clean name e.g. merged_july_2026.xls
+      const origName = file.name.replace(/\.xls$/i, '')
+      a.download = `${origName}_מעודכן.xls`
+      a.click()
+      URL.revokeObjectURL(downloadUrl)
+
+      showToast('הקובץ מוזג ועודכן בהצלחה!', 'success')
     } catch (err) {
       console.error(err)
-      showToast('עיבוד הקובץ נכשל: ' + err.message, 'error')
+      showToast('מיזוג נכשל: ' + err.message, 'error')
+    } finally {
       loading.set(false)
       if (fileInput) fileInput.value = ''
     }

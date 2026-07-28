@@ -8,6 +8,9 @@
   import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
   import GenerateReportButton from '../components/GenerateReportButton.svelte'
   import CollapsibleSection from '../components/CollapsibleSection.svelte'
+  import { parseXlsHeader, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+
+  warmUpPyodide()
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -54,23 +57,12 @@
     const file = e.target.files?.[0]
     if (!file) return
     parsingHeader = true
+    if (!isPyodideReady()) showToast('מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...', 'info')
     try {
-      const arrayBuffer = await file.arrayBuffer()
-      const bytes = new Uint8Array(arrayBuffer)
-      let binary = ''
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-      const base64 = btoa(binary)
-
-      const res = await fetch('/api/parse-xls-header', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xlsBase64: base64 }),
-      })
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}))
-        throw new Error(errJson.error || 'שגיאת שרת לא ידועה')
-      }
-      const parsed = await res.json()
+      // Parsed entirely client-side via Pyodide — no server involved, so
+      // this works the same on GitHub Pages as locally.
+      const xlsBytes = new Uint8Array(await file.arrayBuffer())
+      const parsed = await parseXlsHeader(xlsBytes)
 
       companyNameLocal = parsed.companyName || companyNameLocal
       employeeNameLocal = parsed.employeeName || employeeNameLocal
