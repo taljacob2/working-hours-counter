@@ -1,5 +1,5 @@
 <script>
-  import { logs, calCursor, showToast, loading, excelColorHomeHours } from '../stores/appStore.js'
+  import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
 
   let fileInput
@@ -121,7 +121,8 @@
             body: JSON.stringify({
               xlsBase64: base64,
               logs: homeIntervals,
-              colorHomeHours: colorHomeHoursLocal
+              colorHomeHours: colorHomeHoursLocal,
+              dayOverrides: $dayOverrides
             })
           })
           
@@ -207,7 +208,7 @@
   
   <div class="info-alert">
     <span class="alert-icon">💡</span>
-    <p>שעות העבודה מהבית ימוזגו לתוך עמודות הכניסה/יציאה המשניות (כניסה 2 ויציאה 2) בהתאמה לכל יום עבודה.</p>
+    <p>שעות העבודה מהבית ימוזגו לתוך עמודות הכניסה/יציאה המשניות (כניסה 2 ויציאה 2) בהתאמה לכל יום עבודה. בנוסף, סימון "חופש" יתעדכן אוטומטית בהתאם לימי החופש שסימנת ידנית באפליקציה (הוספה או מחיקה של הסימון בקובץ שהתקבל).</p>
   </div>
 
   <label class="color-toggle-row">

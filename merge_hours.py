@@ -227,13 +227,27 @@ def is_off_day(day_name):
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> [color_home_hours]")
+        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> [color_home_hours] [day_overrides_json]")
         sys.exit(1)
 
     input_xls_path = sys.argv[1]
     logs_json_path = sys.argv[2]
     output_xls_path = sys.argv[3]
     color_home_hours = len(sys.argv) > 4 and sys.argv[4].strip().lower() == 'true'
+
+    # day_overrides: { 'YYYY-MM-DD': 'work' | 'off' }, as set by the user in-app.
+    # When provided (even empty), it is the authoritative source for which days are
+    # 'חופש' — a day is synced to match the app's per-date override rather than
+    # trusting whatever the company's XLS already had marked.
+    day_overrides_provided = len(sys.argv) > 5
+    day_overrides = {}
+    if day_overrides_provided:
+        try:
+            with open(sys.argv[5], 'r', encoding='utf-8') as f:
+                day_overrides = json.load(f)
+        except Exception as e:
+            print(f"Error loading day overrides JSON: {e}")
+            day_overrides = {}
 
     if not os.path.exists(input_xls_path):
         print(f"Input file not found: {input_xls_path}")
@@ -323,11 +337,18 @@ def main():
         day_name = parsed_day.group(3)
         date_str = f"{year}-{month:02d}-{day:02d}"
 
-        is_vac = (sheet_read.cell_value(r, 2) == 'חופש')
+        xls_is_vac = (sheet_read.cell_value(r, 2) == 'חופש')
+        # If the app supplied per-date overrides, they decide whether this day is
+        # 'חופש' — otherwise fall back to whatever the company's XLS already had.
+        if day_overrides_provided:
+            is_vac = day_overrides.get(date_str) == 'off'
+        else:
+            is_vac = xls_is_vac
+
         if is_vac:
             vacation_days_count += 1
             days_worked_count += 1 # Vacation counts as active work/vacation day in Col 11
-            # Keep original values for vacation day; re-write col 2 in blue to mark it
+            # Keep original values for vacation day; (re-)write col 2 in blue to mark it
             vac_st = style_with_colour(row_style(r, 2), colour_vac)
             sheet_write.write(r, 2, 'חופש', vac_st)
             reg_val = sheet_read.cell_value(r, 9)
@@ -340,6 +361,11 @@ def main():
             if not is_off_day(day_name):
                 standard_weekdays_count += 1
             continue
+
+        # Not a vacation day per the app — erase a stale 'חופש' marking the company
+        # sheet had, so column 2 is free to receive normal entry-time processing below.
+        if xls_is_vac:
+            sheet_write.write(r, 2, '', row_style(r, 2))
 
         st = row_style(r)  # original style for every cell we write in this row
 
