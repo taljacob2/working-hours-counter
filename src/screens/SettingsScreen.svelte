@@ -7,6 +7,7 @@
   import { monthBounds } from '../lib/timeUtils.js'
   import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
   import GenerateReportButton from '../components/GenerateReportButton.svelte'
+  import CollapsibleSection from '../components/CollapsibleSection.svelte'
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -569,10 +570,11 @@
 <div class="settings-screen">
   <h1 class="page-title">Settings</h1>
 
-  <!-- Preferences -->
-  <div class="card">
-    <p class="section-title">Preferences</p>
-    
+  <button class="btn btn-primary btn-full" style="margin-bottom:1.5rem" on:click={saveSettings}>
+    💾 Save settings
+  </button>
+
+  <CollapsibleSection title="Work Hours & Preferences" icon="🕐" open={true}>
     <div style="margin-bottom: 1.5rem">
       <label>Required Daily Hours</label>
       <div class="hours-row" style="margin-top: 0.25rem">
@@ -693,9 +695,13 @@
       </p>
     </div>
 
-    <!-- Notifications -->
     <hr class="divider" />
-    <p class="section-title">Notifications</p>
+    <p class="info-text">
+      <strong>How overtime works:</strong> Daily OT = net worked − required hours. Cumulative monthly OT = sum of daily OTs for days with at least one log. Days with no logs (weekends, holidays) are not penalised.
+    </p>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Notifications" icon="🔔">
     {#if !window?.Capacitor?.isNativePlatform?.()}
       <p class="info-text" style="margin-bottom: 0.75rem; font-size: 0.78rem;">
         Notifications only fire on the Android app. Settings saved here sync via Supabase and take effect next time the app opens.
@@ -775,18 +781,9 @@
         </div>
       {/if}
 
-    <button class="btn btn-primary btn-full" style="margin-top:1.5rem" on:click={saveSettings}>
-      💾 Save settings
-    </button>
+  </CollapsibleSection>
 
-    <hr class="divider" />
-    <p class="info-text">
-      <strong>How overtime works:</strong> Daily OT = net worked − required hours. Cumulative monthly OT = sum of daily OTs for days with at least one log. Days with no logs (weekends, holidays) are not penalised.
-    </p>
-  </div>
-
-  <!-- Export -->
-  <div class="card">
+  <CollapsibleSection title="Data Import &amp; Export" icon="💾">
     <p class="section-title">Export Logs by Month</p>
     <div class="export-row">
       <select bind:value={expYear} style="width:100px">
@@ -823,12 +820,40 @@
     {#if expCount !== null}
       <p class="export-count">{expCount} record{expCount !== 1 ? 's' : ''} for this month</p>
     {/if}
-  </div>
 
-  <ExcelMergeButton />
+    <hr class="divider" style="margin: 1.25rem 0" />
+    <p class="section-title">Import Logs from JSON</p>
+    <div class="import-modes">
+      <div class="import-mode">
+        <strong>Merge</strong>
+        <span class="info-text">Upserts records by ID — existing logs not in the file are kept.</span>
+      </div>
+      <div class="import-mode">
+        <strong>Replace</strong>
+        <span class="info-text">Deletes all logs for the file's month(s) first, then inserts the imported records. True restore.</span>
+      </div>
+    </div>
+    <input
+      bind:this={importFileInput}
+      type="file"
+      accept=".json,application/json"
+      on:change={e => importFile = e.target.files[0] ?? null}
+      style="margin-top: 0.75rem; font-size: 0.875rem;"
+    />
+    <div class="export-row" style="margin-top: 0.75rem;">
+      <button class="btn btn-secondary" style="flex:1" on:click={doImportMerge} disabled={!importFile || importing}>
+        {importing ? '⏳…' : '⬆ Merge'}
+      </button>
+      <button class="btn btn-danger" style="flex:1" on:click={doImportReplace} disabled={!importFile || importing}>
+        {importing ? '⏳…' : '⬆ Replace'}
+      </button>
+    </div>
+  </CollapsibleSection>
 
-  <!-- Report generation from scratch (no upload needed) -->
-  <div class="card">
+  <CollapsibleSection title="Excel Reports" icon="📊">
+    <ExcelMergeButton />
+
+    <div class="card">
     <p class="section-title">פרטי עובד וחברה (לדוח שנוצר מאפס)</p>
     <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי. ניתן למלא אותם ידנית, או לייבא אותם אוטומטית מקובץ חברה קיים.</p>
 
@@ -870,49 +895,18 @@
     </div>
   </div>
 
-  <GenerateReportButton
-    companyName={companyNameLocal}
-    employeeName={employeeNameLocal}
-    employeeCode={employeeCodeLocal}
-    cardNumber={cardNumberLocal}
-    payrollNumber={payrollNumberLocal}
-    employmentStartDate={employmentStartDateLocal}
-    workAgreementText={workAgreementTextLocal}
-  />
-
-  <!-- Import -->
-  <div class="card">
-    <p class="section-title">Import Logs from JSON</p>
-    <div class="import-modes">
-      <div class="import-mode">
-        <strong>Merge</strong>
-        <span class="info-text">Upserts records by ID — existing logs not in the file are kept.</span>
-      </div>
-      <div class="import-mode">
-        <strong>Replace</strong>
-        <span class="info-text">Deletes all logs for the file's month(s) first, then inserts the imported records. True restore.</span>
-      </div>
-    </div>
-    <input
-      bind:this={importFileInput}
-      type="file"
-      accept=".json,application/json"
-      on:change={e => importFile = e.target.files[0] ?? null}
-      style="margin-top: 0.75rem; font-size: 0.875rem;"
+    <GenerateReportButton
+      companyName={companyNameLocal}
+      employeeName={employeeNameLocal}
+      employeeCode={employeeCodeLocal}
+      cardNumber={cardNumberLocal}
+      payrollNumber={payrollNumberLocal}
+      employmentStartDate={employmentStartDateLocal}
+      workAgreementText={workAgreementTextLocal}
     />
-    <div class="export-row" style="margin-top: 0.75rem;">
-      <button class="btn btn-secondary" style="flex:1" on:click={doImportMerge} disabled={!importFile || importing}>
-        {importing ? '⏳…' : '⬆ Merge'}
-      </button>
-      <button class="btn btn-danger" style="flex:1" on:click={doImportReplace} disabled={!importFile || importing}>
-        {importing ? '⏳…' : '⬆ Replace'}
-      </button>
-    </div>
-  </div>
+  </CollapsibleSection>
 
-  <!-- Office Auto-Track -->
-  <div class="card">
-    <p class="section-title">Office Auto-Track (GPS)</p>
+  <CollapsibleSection title="Office Auto-Track (GPS)" icon="📍">
     <p class="info-text">
       Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave a saved location.
       {#if !window?.Capacitor?.isNativePlatform?.()}
@@ -1022,17 +1016,15 @@
         Go to your office, enter a name (optional), then tap Add. Your GPS position will be saved.
       </p>
     {/if}
-  </div>
+  </CollapsibleSection>
 
-  <!-- Account / Reconfigure -->
-  <div class="card">
-    <p class="section-title">Account &amp; Connection</p>
+  <CollapsibleSection title="Account &amp; Connection" icon="👤">
     <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
     <div class="account-actions">
       <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
       <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
     </div>
-  </div>
+  </CollapsibleSection>
 </div>
 
 <style>

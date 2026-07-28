@@ -112,6 +112,12 @@ label { font-size: 0.875rem; font-weight: 500; color: var(--color-text-muted); d
 }
 .card + .card { margin-top: var(--space-4); }
 
+/* ── Collapsible section (CollapsibleSection.svelte) ── */
+/* Global, not component-scoped: adjacent-sibling spacing must apply between
+   separate component instances, which Svelte's per-component scoped CSS
+   can't reach across. */
+.collapsible + .collapsible { margin-top: var(--space-4); }
+
 /* ── Buttons ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
