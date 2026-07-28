@@ -66,6 +66,38 @@ def detect_colours(rb, sheet):
     return positive, negative, vacation
 
 
+def detect_hour_format(rb, sheet):
+    """Find the elapsed-hours number format (e.g. 'h:mm') this template uses for
+    worked-hour cells (entry/exit times, daily 100%/125%/150% columns). The format
+    is only ever applied by the source software to cells that actually hold a
+    value — a day that has never had e.g. 125% overtime keeps its cell blank with
+    a bare 'General' format — so we scan for any populated cell in the known
+    hour columns rather than trusting a single row/col.
+    """
+    for r in range(6, min(sheet.nrows, 41)):
+        for c in (9, 2, 3, 13, 10, 11):
+            try:
+                xf_idx = sheet.cell_xf_index(r, c)
+                xf = rb.xf_list[xf_idx]
+                fmt = rb.format_map.get(xf.format_key)
+                if fmt and fmt.format_str and fmt.format_str != 'General':
+                    return fmt.format_str
+            except Exception:
+                continue
+    return 'h:mm'
+
+
+def style_with_number_format(base_style, num_format_str):
+    """Return a shallow copy of base_style with only the number format changed."""
+    new_style = xlwt.XFStyle()
+    new_style.font          = base_style.font
+    new_style.pattern       = base_style.pattern
+    new_style.borders       = base_style.borders
+    new_style.alignment     = base_style.alignment
+    new_style.num_format_str = num_format_str
+    return new_style
+
+
 def style_with_colour(base_style, colour_index):
     """Return a shallow copy of base_style with only the font colour changed."""
     new_style = xlwt.XFStyle()
@@ -77,16 +109,17 @@ def style_with_colour(base_style, colour_index):
     f.italic        = base_style.font.italic
     f.underline     = base_style.font.underline
     f.colour_index  = colour_index
-    new_style.font      = f
-    new_style.pattern   = base_style.pattern
-    new_style.borders   = base_style.borders
-    new_style.alignment = base_style.alignment
+    new_style.font          = f
+    new_style.pattern       = base_style.pattern
+    new_style.borders       = base_style.borders
+    new_style.alignment     = base_style.alignment
+    new_style.num_format_str = base_style.num_format_str
     return new_style
 
 
 def make_style_from_xf(rb, xf_index):
     """Reconstruct an xlwt XFStyle from an xlrd XF-format index.
-    This preserves the original font, colour, background and borders.
+    This preserves the original font, colour, background, borders and number format.
     """
     xf    = rb.xf_list[xf_index]
     font  = rb.font_list[xf.font_index]
@@ -95,6 +128,13 @@ def make_style_from_xf(rb, xf_index):
     align = xf.alignment
 
     style = xlwt.XFStyle()
+
+    # ── Number format ───────────────────────────────
+    # Without this, cells default to 'General' when rewritten — an hour-fraction
+    # value like 0.375 would then render as the raw decimal "0.375" instead of
+    # "9:00", since the original 'h:mm'-style format is otherwise lost.
+    num_fmt = rb.format_map.get(xf.format_key)
+    style.num_format_str = num_fmt.format_str if num_fmt else 'General'
 
     # ── Font ────────────────────────────────────────
     f = xlwt.Font()
@@ -281,6 +321,7 @@ def main():
     sheet_write = wb.get_sheet(0)
 
     colour_pos, colour_neg, colour_vac = detect_colours(rb, sheet_read)
+    hour_fmt = detect_hour_format(rb, sheet_read)
 
     # Build a per-(row, col) style cache. Most cells in a row share the same
     # formatting, but some (e.g. a 'חופש'-marked col 2) can carry their own
@@ -295,6 +336,12 @@ def main():
                 xf_idx = sheet_read.cell_xf_index(r, 0)
             _style_cache[key] = make_style_from_xf(rb, xf_idx)
         return _style_cache[key]
+
+    def hour_style(r, col):
+        # Like row_style(), but forces the elapsed-hours number format — the
+        # source cell may have been blank (and thus 'General') if this is the
+        # first time this row/column ever holds an hour value.
+        return style_with_number_format(row_style(r, col), hour_fmt)
 
     # 3. Parse month/year from Row 1
     month = 7
@@ -368,8 +415,6 @@ def main():
         if xls_is_vac:
             sheet_write.write(r, 2, '', row_style(r, 2))
 
-        st = row_style(r)  # original style for every cell we write in this row
-
         # Non-vacation day: process intervals
         # Read existing Office intervals
         xls_intervals = []
@@ -418,11 +463,11 @@ def main():
 
         if net_total <= 0:
             # Deficit day or weekend with no work
-            sheet_write.write(r,  9, '', st)
-            sheet_write.write(r, 10, '', st)
-            sheet_write.write(r, 11, '', st)
-            sheet_write.write(r, 12, '', st)
-            sheet_write.write(r, 13, '', st)
+            sheet_write.write(r,  9, '', row_style(r, 9))
+            sheet_write.write(r, 10, '', row_style(r, 10))
+            sheet_write.write(r, 11, '', row_style(r, 11))
+            sheet_write.write(r, 12, '', row_style(r, 12))
+            sheet_write.write(r, 13, '', row_style(r, 13))
 
             if not is_off_day(day_name):
                 # Deficit day — write -09:00 in red
@@ -439,11 +484,11 @@ def main():
 
         if is_off_day(day_name):
             # Weekend work: all hours are overtime!
-            sheet_write.write(r,  9, '',        st)
-            sheet_write.write(r, 10, '',        st)
-            sheet_write.write(r, 11, net_total, st)
-            sheet_write.write(r, 12, '',        st)
-            sheet_write.write(r, 13, net_total, st)
+            sheet_write.write(r,  9, '',        row_style(r, 9))
+            sheet_write.write(r, 10, '',        row_style(r, 10))
+            sheet_write.write(r, 11, net_total, hour_style(r, 11))
+            sheet_write.write(r, 12, '',        row_style(r, 12))
+            sheet_write.write(r, 13, net_total, hour_style(r, 13))
 
             daily_regular_vals.append('')
             daily_125_vals.append('')
@@ -469,11 +514,11 @@ def main():
             ot_125_f = ot_125 / 24.0 if ot_125 > 0 else ''
             ot_150_f = ot_150 / 24.0 if ot_150 > 0 else ''
 
-            sheet_write.write(r,  9, reg_f,    st)
-            sheet_write.write(r, 10, ot_125_f, st)
-            sheet_write.write(r, 11, ot_150_f, st)
-            sheet_write.write(r, 12, '',        st)
-            sheet_write.write(r, 13, net_total, st)
+            sheet_write.write(r,  9, reg_f,    hour_style(r, 9))
+            sheet_write.write(r, 10, ot_125_f, hour_style(r, 10))
+            sheet_write.write(r, 11, ot_150_f, hour_style(r, 11))
+            sheet_write.write(r, 12, '',        row_style(r, 12))
+            sheet_write.write(r, 13, net_total, hour_style(r, 13))
 
             daily_regular_vals.append(reg_f)
             daily_125_vals.append(ot_125_f)
@@ -510,12 +555,11 @@ def main():
     
     cum_diff_str = f"-{fmt_minutes(total_deficit_minutes)}/+{fmt_minutes(total_surplus_minutes)}"
 
-    r41 = row_style(41)
-    sheet_write.write(41,  9, reg_sum_str,                        r41)
-    sheet_write.write(41, 10, sum_125_f if sum_125_f > 0 else '', r41)
-    sheet_write.write(41, 11, sum_150_f if sum_150_f > 0 else '', r41)
-    sheet_write.write(41, 12, sum_200_f if sum_200_f > 0 else '', r41)
-    sheet_write.write(41, 13, tot_sum_str,                        r41)
+    sheet_write.write(41,  9, reg_sum_str,                        row_style(41, 9))
+    sheet_write.write(41, 10, sum_125_f if sum_125_f > 0 else '', hour_style(41, 10))
+    sheet_write.write(41, 11, sum_150_f if sum_150_f > 0 else '', hour_style(41, 11))
+    sheet_write.write(41, 12, sum_200_f if sum_200_f > 0 else '', hour_style(41, 12))
+    sheet_write.write(41, 13, tot_sum_str,                        row_style(41, 13))
     sheet_write.write(41, 14, cum_diff_str,                       row_style(41, 14))
 
     # 6. Write bottom table rows
@@ -526,21 +570,21 @@ def main():
     sheet_write.write(45, 15, vacation_days_count,row_style(45, 15))
 
     # Row 46
-    sheet_write.write(46, 6, sum_125_f if sum_125_f > 0 else 0.0, row_style(46, 6))
+    sheet_write.write(46, 6, sum_125_f if sum_125_f > 0 else 0.0, hour_style(46, 6))
 
     # Row 47
     target_hours_mins = standard_weekdays_count * 9 * 60
     target_hours_str  = f"{target_hours_mins // 60}:{target_hours_mins % 60:02d}"
-    sheet_write.write(47,  6, sum_150_f if sum_150_f > 0 else 0.0, row_style(47,  6))
+    sheet_write.write(47,  6, sum_150_f if sum_150_f > 0 else 0.0, hour_style(47,  6))
     sheet_write.write(47,  9, target_hours_str,                     row_style(47,  9))
     sheet_write.write(47, 11, standard_weekdays_count,               row_style(47, 11))
 
     # Row 48
-    sheet_write.write(48, 6, sum_200_f if sum_200_f > 0 else 0.0, row_style(48, 6))
+    sheet_write.write(48, 6, sum_200_f if sum_200_f > 0 else 0.0, hour_style(48, 6))
 
     # Row 52
     sum_ot_f = sum_125_f + sum_150_f + sum_200_f
-    sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, row_style(52, 6))
+    sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, hour_style(52, 6))
 
     # Row 53 — cumulative deficit (red)
     sheet_write.write(53, 6, f"-{fmt_minutes(total_deficit_minutes)}",
