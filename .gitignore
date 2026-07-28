@@ -31,3 +31,7 @@ release.keystore
 *.njsproj
 *.sln
 *.sw?
+
+# ---- Excel Sheets
+*.xls
+*.xlsx
