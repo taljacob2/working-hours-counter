@@ -282,18 +282,19 @@ def main():
 
     colour_pos, colour_neg, colour_vac = detect_colours(rb, sheet_read)
 
-    # Build a per-row style cache (keyed by row index).
-    # We read the XF from column 1 (the date column) of each row;
-    # all data cells in that row share the same formatting.
+    # Build a per-(row, col) style cache. Most cells in a row share the same
+    # formatting, but some (e.g. a 'חופש'-marked col 2) can carry their own
+    # colour — so the cache key must include col, not just row.
     _style_cache = {}
     def row_style(r, col=1):
-        if r not in _style_cache:
+        key = (r, col)
+        if key not in _style_cache:
             try:
                 xf_idx = sheet_read.cell_xf_index(r, col)
             except Exception:
                 xf_idx = sheet_read.cell_xf_index(r, 0)
-            _style_cache[r] = make_style_from_xf(rb, xf_idx)
-        return _style_cache[r]
+            _style_cache[key] = make_style_from_xf(rb, xf_idx)
+        return _style_cache[key]
 
     # 3. Parse month/year from Row 1
     month = 7
