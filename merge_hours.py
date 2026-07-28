@@ -87,6 +87,22 @@ def detect_hour_format(rb, sheet):
     return 'h:mm'
 
 
+def to_elapsed_hour_format(fmt_str):
+    """Convert a plain hour format like 'h:mm' to its non-wrapping elapsed form
+    '[h]:mm'. A plain (unbracketed) hour token wraps at 24h in Excel — a monthly
+    total of e.g. 42:27 would silently render as '18:27', dropping a full day.
+    Monthly aggregate cells (total 125%/150%/200% overtime, etc.) can genuinely
+    exceed 24 hours, so they need the bracketed elapsed form; per-day cells never
+    do, so they keep the template's original format as-is.
+    """
+    if not fmt_str or fmt_str.strip().startswith('['):
+        return fmt_str or '[h]:mm'
+    m = re.match(r'^(h+)', fmt_str, re.IGNORECASE)
+    if not m:
+        return '[h]:mm'
+    return f'[{m.group(1)}]{fmt_str[m.end():]}'
+
+
 def style_with_number_format(base_style, num_format_str):
     """Return a shallow copy of base_style with only the number format changed."""
     new_style = xlwt.XFStyle()
@@ -322,6 +338,7 @@ def main():
 
     colour_pos, colour_neg, colour_vac = detect_colours(rb, sheet_read)
     hour_fmt = detect_hour_format(rb, sheet_read)
+    monthly_hour_fmt = to_elapsed_hour_format(hour_fmt)
 
     # Build a per-(row, col) style cache. Most cells in a row share the same
     # formatting, but some (e.g. a 'חופש'-marked col 2) can carry their own
@@ -342,6 +359,13 @@ def main():
         # source cell may have been blank (and thus 'General') if this is the
         # first time this row/column ever holds an hour value.
         return style_with_number_format(row_style(r, col), hour_fmt)
+
+    def monthly_hour_style(r, col):
+        # Like hour_style(), but uses the non-wrapping '[h]:mm' form — a
+        # monthly-aggregate cell (total 125%/150%/200% overtime, etc.) can
+        # exceed 24 hours, and a plain 'h:mm' format would silently drop
+        # whole days from the display.
+        return style_with_number_format(row_style(r, col), monthly_hour_fmt)
 
     # 3. Parse month/year from Row 1
     month = 7
@@ -556,9 +580,9 @@ def main():
     cum_diff_str = f"-{fmt_minutes(total_deficit_minutes)}/+{fmt_minutes(total_surplus_minutes)}"
 
     sheet_write.write(41,  9, reg_sum_str,                        row_style(41, 9))
-    sheet_write.write(41, 10, sum_125_f if sum_125_f > 0 else '', hour_style(41, 10))
-    sheet_write.write(41, 11, sum_150_f if sum_150_f > 0 else '', hour_style(41, 11))
-    sheet_write.write(41, 12, sum_200_f if sum_200_f > 0 else '', hour_style(41, 12))
+    sheet_write.write(41, 10, sum_125_f if sum_125_f > 0 else '', monthly_hour_style(41, 10))
+    sheet_write.write(41, 11, sum_150_f if sum_150_f > 0 else '', monthly_hour_style(41, 11))
+    sheet_write.write(41, 12, sum_200_f if sum_200_f > 0 else '', monthly_hour_style(41, 12))
     sheet_write.write(41, 13, tot_sum_str,                        row_style(41, 13))
     sheet_write.write(41, 14, cum_diff_str,                       row_style(41, 14))
 
@@ -570,21 +594,21 @@ def main():
     sheet_write.write(45, 15, vacation_days_count,row_style(45, 15))
 
     # Row 46
-    sheet_write.write(46, 6, sum_125_f if sum_125_f > 0 else 0.0, hour_style(46, 6))
+    sheet_write.write(46, 6, sum_125_f if sum_125_f > 0 else 0.0, monthly_hour_style(46, 6))
 
     # Row 47
     target_hours_mins = standard_weekdays_count * 9 * 60
     target_hours_str  = f"{target_hours_mins // 60}:{target_hours_mins % 60:02d}"
-    sheet_write.write(47,  6, sum_150_f if sum_150_f > 0 else 0.0, hour_style(47,  6))
+    sheet_write.write(47,  6, sum_150_f if sum_150_f > 0 else 0.0, monthly_hour_style(47,  6))
     sheet_write.write(47,  9, target_hours_str,                     row_style(47,  9))
     sheet_write.write(47, 11, standard_weekdays_count,               row_style(47, 11))
 
     # Row 48
-    sheet_write.write(48, 6, sum_200_f if sum_200_f > 0 else 0.0, hour_style(48, 6))
+    sheet_write.write(48, 6, sum_200_f if sum_200_f > 0 else 0.0, monthly_hour_style(48, 6))
 
     # Row 52
     sum_ot_f = sum_125_f + sum_150_f + sum_200_f
-    sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, hour_style(52, 6))
+    sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, monthly_hour_style(52, 6))
 
     # Row 53 — cumulative deficit (red)
     sheet_write.write(53, 6, f"-{fmt_minutes(total_deficit_minutes)}",
