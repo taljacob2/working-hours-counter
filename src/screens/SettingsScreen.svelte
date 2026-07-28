@@ -38,6 +38,59 @@
   let workAgreementTextLocal = ''
   workAgreementText.subscribe(v => workAgreementTextLocal = v)
 
+  let headerFileInput
+  let parsingHeader = false
+
+  // 'DD/MM/YY' (vendor format) -> 'YYYY-MM-DD' (<input type="date"> format)
+  function vendorDateToIso(vendorDate) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(vendorDate || '')
+    if (!m) return ''
+    const [, d, mo, yy] = m
+    return `20${yy}-${mo}-${d}`
+  }
+
+  async function handleHeaderFileSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    parsingHeader = true
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+      let binary = ''
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+      const base64 = btoa(binary)
+
+      const res = await fetch('/api/parse-xls-header', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xlsBase64: base64 }),
+      })
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}))
+        throw new Error(errJson.error || 'שגיאת שרת לא ידועה')
+      }
+      const parsed = await res.json()
+
+      companyNameLocal = parsed.companyName || companyNameLocal
+      employeeNameLocal = parsed.employeeName || employeeNameLocal
+      employeeCodeLocal = parsed.employeeCode || employeeCodeLocal
+      cardNumberLocal = parsed.cardNumber || cardNumberLocal
+      payrollNumberLocal = parsed.payrollNumber || payrollNumberLocal
+      workAgreementTextLocal = parsed.agreementText || workAgreementTextLocal
+      const iso = vendorDateToIso(parsed.startDate)
+      if (iso) employmentStartDateLocal = iso
+
+      await saveSettings()
+      showToast('הפרטים נטענו ונשמרו בהצלחה ✓', 'success')
+    } catch (err) {
+      console.error(err)
+      showToast('טעינת הפרטים נכשלה: ' + err.message, 'error')
+    } finally {
+      parsingHeader = false
+      if (headerFileInput) headerFileInput.value = ''
+    }
+  }
+
   let notifMorningEnabledLocal = false
   notifMorningEnabled.subscribe(v => notifMorningEnabledLocal = v)
   let notifMorningTimeLocal = '09:00'
@@ -777,7 +830,15 @@
   <!-- Report generation from scratch (no upload needed) -->
   <div class="card">
     <p class="section-title">פרטי עובד וחברה (לדוח שנוצר מאפס)</p>
-    <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי.</p>
+    <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי. ניתן למלא אותם ידנית, או לייבא אותם אוטומטית מקובץ חברה קיים.</p>
+
+    <button type="button" class="btn btn-secondary" style="width:100%; margin-top:0.5rem" on:click={() => headerFileInput.click()} disabled={parsingHeader}>
+      {parsingHeader ? '⏳ מייבא ושומר...' : '⬆ ייבוא פרטים מקובץ חברה (Import)'}
+    </button>
+    <p class="info-text" style="margin-top: 0.35rem; font-size: 0.78rem;">
+      הפרטים ייקראו מהכותרת של הקובץ ויישמרו מיד ב-Supabase, בדיוק כמו לחיצה על "שמור הגדרות".
+    </p>
+    <input type="file" accept=".xls" bind:this={headerFileInput} on:change={handleHeaderFileSelect} style="display:none" />
 
     <div style="margin-top: 0.75rem">
       <label>שם חברה</label>

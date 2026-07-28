@@ -14,6 +14,60 @@ export default defineConfig({
           const url = req.url ? req.url.split('?')[0] : ''
           const isMergeRoute = url === '/api/merge-xls' || url === '/working-hours-counter/api/merge-xls'
           const isGenerateRoute = url === '/api/generate-xls' || url === '/working-hours-counter/api/generate-xls'
+          const isParseHeaderRoute = url === '/api/parse-xls-header' || url === '/working-hours-counter/api/parse-xls-header'
+
+          if (isParseHeaderRoute && req.method === 'POST') {
+            let phBody = ''
+            req.on('data', chunk => { phBody += chunk })
+            req.on('end', () => {
+              try {
+                const { xlsBase64 } = JSON.parse(phBody)
+                if (!xlsBase64) {
+                  res.statusCode = 400
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: 'Missing xlsBase64' }))
+                  return
+                }
+
+                const id = Math.random().toString(36).substring(7)
+                const tempIn = `_temp_ph_${id}.xls`
+                writeFileSync(tempIn, Buffer.from(xlsBase64, 'base64'))
+
+                exec(`python parse_header.py "${tempIn}"`, (error, stdout, stderr) => {
+                  try { if (existsSync(tempIn)) unlinkSync(tempIn) } catch(e){}
+
+                  if (error) {
+                    res.statusCode = 500
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify({ error: `Python script error: ${stderr || error.message}` }))
+                    return
+                  }
+
+                  try {
+                    const parsed = JSON.parse(stdout)
+                    if (parsed.error) {
+                      res.statusCode = 500
+                      res.setHeader('Content-Type', 'application/json')
+                      res.end(JSON.stringify({ error: parsed.error }))
+                      return
+                    }
+                    res.statusCode = 200
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify(parsed))
+                  } catch (parseOutErr) {
+                    res.statusCode = 500
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify({ error: `Failed to parse script output: ${parseOutErr.message}` }))
+                  }
+                })
+              } catch (parseErr) {
+                res.statusCode = 400
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ error: `Invalid JSON payload: ${parseErr.message}` }))
+              }
+            })
+            return
+          }
 
           if (isGenerateRoute && req.method === 'POST') {
             let genBody = ''
