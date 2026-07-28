@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours, fillMissingOfficeHours } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -206,6 +206,21 @@
 
       const fmoh = settings?.find(s => s.key === 'fillMissingOfficeHours')?.value
       fillMissingOfficeHours.set((fmoh ?? localStorage.getItem('whl_fill_missing_office') ?? 'true') === 'true')
+
+      const cn = settings?.find(s => s.key === 'companyName')?.value
+      companyName.set(cn ?? localStorage.getItem('whl_company_name') ?? '')
+      const en = settings?.find(s => s.key === 'employeeName')?.value
+      employeeName.set(en ?? localStorage.getItem('whl_employee_name') ?? '')
+      const ec = settings?.find(s => s.key === 'employeeCode')?.value
+      employeeCode.set(ec ?? localStorage.getItem('whl_employee_code') ?? '')
+      const ccn = settings?.find(s => s.key === 'cardNumber')?.value
+      cardNumber.set(ccn ?? localStorage.getItem('whl_card_number') ?? '')
+      const pn = settings?.find(s => s.key === 'payrollNumber')?.value
+      payrollNumber.set(pn ?? localStorage.getItem('whl_payroll_number') ?? '')
+      const sd = settings?.find(s => s.key === 'employmentStartDate')?.value
+      employmentStartDate.set(sd ?? localStorage.getItem('whl_employment_start_date') ?? '')
+      const at = settings?.find(s => s.key === 'workAgreementText')?.value
+      workAgreementText.set(at ?? localStorage.getItem('whl_work_agreement_text') ?? '')
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

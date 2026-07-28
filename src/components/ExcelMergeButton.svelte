@@ -1,6 +1,7 @@
 <script>
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
+  import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
 
   let fileInput
   let uploadEl
@@ -28,51 +29,11 @@
     await sb.from('work_settings').upsert([{ key: 'fillMissingOfficeHours', value: String(checked) }])
   }
   
-  // Format local Date to HH:MM (24h)
-  function formatLocalHM(tsStr) {
-    const d = new Date(tsStr)
-    const h = String(d.getHours()).padStart(2, '0')
-    const m = String(d.getMinutes()).padStart(2, '0')
-    return `${h}:${m}`
-  }
-  
   // Get month name in Hebrew/English
   function getMonthName(date) {
     return date.toLocaleString('he-IL', { month: 'long', year: 'numeric' })
   }
 
-  // Pair resume/pause events into { date, start, end, platform } intervals for one platform
-  function buildIntervalsForPlatform(monthLogs, platform) {
-    const sortedLogs = monthLogs
-      .filter(l => l.platform === platform)
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-
-    const intervals = []
-    const dayGroups = {}
-    for (const log of sortedLogs) {
-      if (!dayGroups[log.date_key]) dayGroups[log.date_key] = []
-      dayGroups[log.date_key].push(log)
-    }
-
-    for (const [dateKey, dayLogs] of Object.entries(dayGroups)) {
-      let openResume = null
-      for (const log of dayLogs) {
-        if (log.action === 'resume') {
-          openResume = log
-        } else if (log.action === 'pause' && openResume) {
-          intervals.push({
-            date: dateKey,
-            start: formatLocalHM(openResume.timestamp),
-            end: formatLocalHM(log.timestamp),
-            platform
-          })
-          openResume = null
-        }
-      }
-    }
-    return intervals
-  }
-  
   async function handleFileSelect(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -109,15 +70,11 @@
       // 1. Get selected month from calendar cursor
       const targetYear = $calCursor.getFullYear()
       const targetMonth = $calCursor.getMonth() + 1
-      const prefix = `${targetYear}-${String(targetMonth).padStart(2, '0')}`
-      
+
       // 2. Filter this month's logs and pair resume/pause events into intervals,
       // per platform. Office intervals are only used by the backend to backfill a
       // day the company's own sheet never detailed — never to override real data.
-      const monthLogs = [...$logs].filter(l => l.date_key.startsWith(prefix))
-      const homeIntervals = buildIntervalsForPlatform(monthLogs, 'home')
-      const officeIntervals = buildIntervalsForPlatform(monthLogs, 'office')
-      const allIntervals = [...homeIntervals, ...officeIntervals]
+      const allIntervals = monthLogsAndIntervals([...$logs], targetYear, targetMonth)
 
       // 3. Read file as ArrayBuffer and convert to Base64
       const reader = new FileReader()

@@ -1,11 +1,12 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
   import { requestNotificationPermission } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
   import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
+  import GenerateReportButton from '../components/GenerateReportButton.svelte'
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -21,6 +22,21 @@
 
   let rebalHistoryCapLocal = 0
   rebalHistoryCap.subscribe(v => rebalHistoryCapLocal = v)
+
+  let companyNameLocal = ''
+  companyName.subscribe(v => companyNameLocal = v)
+  let employeeNameLocal = ''
+  employeeName.subscribe(v => employeeNameLocal = v)
+  let employeeCodeLocal = ''
+  employeeCode.subscribe(v => employeeCodeLocal = v)
+  let cardNumberLocal = ''
+  cardNumber.subscribe(v => cardNumberLocal = v)
+  let payrollNumberLocal = ''
+  payrollNumber.subscribe(v => payrollNumberLocal = v)
+  let employmentStartDateLocal = ''
+  employmentStartDate.subscribe(v => employmentStartDateLocal = v)
+  let workAgreementTextLocal = ''
+  workAgreementText.subscribe(v => workAgreementTextLocal = v)
 
   let notifMorningEnabledLocal = false
   notifMorningEnabled.subscribe(v => notifMorningEnabledLocal = v)
@@ -87,6 +103,21 @@
     rebalHistoryCap.set(rebalHistoryCapLocal)
     localStorage.setItem('whl_rebal_history_cap', String(rebalHistoryCapLocal))
 
+    companyName.set(companyNameLocal)
+    localStorage.setItem('whl_company_name', companyNameLocal)
+    employeeName.set(employeeNameLocal)
+    localStorage.setItem('whl_employee_name', employeeNameLocal)
+    employeeCode.set(employeeCodeLocal)
+    localStorage.setItem('whl_employee_code', employeeCodeLocal)
+    cardNumber.set(cardNumberLocal)
+    localStorage.setItem('whl_card_number', cardNumberLocal)
+    payrollNumber.set(payrollNumberLocal)
+    localStorage.setItem('whl_payroll_number', payrollNumberLocal)
+    employmentStartDate.set(employmentStartDateLocal)
+    localStorage.setItem('whl_employment_start_date', employmentStartDateLocal)
+    workAgreementText.set(workAgreementTextLocal)
+    localStorage.setItem('whl_work_agreement_text', workAgreementTextLocal)
+
     // If the off-days configuration changed, clear all per-date overrides — they were
     // set relative to the old config and would silently shadow the new one.
     const offDaysChanged = [...$offDays].sort().join(',') !== [...offDaysLocal].sort().join(',')
@@ -125,6 +156,13 @@
       { key: 'notifEveningTime',    value: notifEveningTimeLocal },
       { key: 'notifTargetEnabled',  value: String(notifTargetEnabledLocal) },
       { key: 'notifTargetHoursOverride', value: notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '' },
+      { key: 'companyName', value: companyNameLocal },
+      { key: 'employeeName', value: employeeNameLocal },
+      { key: 'employeeCode', value: employeeCodeLocal },
+      { key: 'cardNumber', value: cardNumberLocal },
+      { key: 'payrollNumber', value: payrollNumberLocal },
+      { key: 'employmentStartDate', value: employmentStartDateLocal },
+      { key: 'workAgreementText', value: workAgreementTextLocal },
     ]
     if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
     const { error } = await sb.from('work_settings').upsert(upsertRows)
@@ -735,6 +773,51 @@
   </div>
 
   <ExcelMergeButton />
+
+  <!-- Report generation from scratch (no upload needed) -->
+  <div class="card">
+    <p class="section-title">פרטי עובד וחברה (לדוח שנוצר מאפס)</p>
+    <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי.</p>
+
+    <div style="margin-top: 0.75rem">
+      <label>שם חברה</label>
+      <input type="text" bind:value={companyNameLocal} placeholder="לדוגמה: אי אנד איי מערכות תו" style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>שם עובד</label>
+      <input type="text" bind:value={employeeNameLocal} placeholder="שם מלא" style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>קוד עובד</label>
+      <input type="text" bind:value={employeeCodeLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>מספר כרטיס</label>
+      <input type="text" bind:value={cardNumberLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>מס. בתוכנת שכר</label>
+      <input type="text" bind:value={payrollNumberLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>תאריך תחילת עבודה</label>
+      <input type="date" bind:value={employmentStartDateLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>הסכם עבודה</label>
+      <input type="text" bind:value={workAgreementTextLocal} placeholder="לדוגמה: הסכם נוספות 9" style="width:100%; margin-top:0.25rem" />
+    </div>
+  </div>
+
+  <GenerateReportButton
+    companyName={companyNameLocal}
+    employeeName={employeeNameLocal}
+    employeeCode={employeeCodeLocal}
+    cardNumber={cardNumberLocal}
+    payrollNumber={payrollNumberLocal}
+    employmentStartDate={employmentStartDateLocal}
+    workAgreementText={workAgreementTextLocal}
+  />
 
   <!-- Import -->
   <div class="card">
