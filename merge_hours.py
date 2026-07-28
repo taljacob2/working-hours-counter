@@ -8,6 +8,33 @@ import os
 import re
 
 
+# ── Cell colour constants (xlwt colour_index from the standard palette) ──────
+# These match the colours used by Excel for positive/negative/special cells.
+COLOUR_DEFAULT  = 8   # Black  — original cell colour
+COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime days
+COLOUR_NEGATIVE = 10  # Red         — deficit days
+COLOUR_VACATION = 12  # Blue        — vacation (חופש) entries
+COLOUR_HOME     = 49  # Teal/Cyan   — home-hours intervals we insert
+
+
+def style_with_colour(base_style, colour_index):
+    """Return a shallow copy of base_style with only the font colour changed."""
+    new_style = xlwt.XFStyle()
+    # Copy font and override colour
+    f = xlwt.Font()
+    f.name          = base_style.font.name
+    f.height        = base_style.font.height
+    f.bold          = base_style.font.bold
+    f.italic        = base_style.font.italic
+    f.underline     = base_style.font.underline
+    f.colour_index  = colour_index
+    new_style.font      = f
+    new_style.pattern   = base_style.pattern
+    new_style.borders   = base_style.borders
+    new_style.alignment = base_style.alignment
+    return new_style
+
+
 def make_style_from_xf(rb, xf_index):
     """Reconstruct an xlwt XFStyle from an xlrd XF-format index.
     This preserves the original font, colour, background and borders.
@@ -248,7 +275,9 @@ def main():
         if is_vac:
             vacation_days_count += 1
             days_worked_count += 1 # Vacation counts as active work/vacation day in Col 11
-            # Keep original values for vacation day
+            # Keep original values for vacation day; re-write col 2 in blue to mark it
+            vac_st = style_with_colour(row_style(r, 2), COLOUR_VACATION)
+            sheet_write.write(r, 2, 'חופש', vac_st)
             reg_val = sheet_read.cell_value(r, 9)
             daily_regular_vals.append(reg_val)
             daily_125_vals.append(sheet_read.cell_value(r, 10))
@@ -278,7 +307,7 @@ def main():
         # Sort home logs by start time
         day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
         
-        # Merge home intervals into sheet
+        # Merge home intervals into sheet (written in teal to distinguish from office hours)
         curr_p = len(xls_intervals)
         for log in day_home_logs:
             if curr_p < 3:
@@ -287,8 +316,9 @@ def main():
                 if start_str and end_str:
                     col_ent = 2 + 2 * curr_p
                     col_ex = 3 + 2 * curr_p
-                    sheet_write.write(r, col_ent, start_str, row_style(r, col_ent))
-                    sheet_write.write(r, col_ex,  end_str,   row_style(r, col_ex))
+                    home_st = style_with_colour(row_style(r, col_ent), COLOUR_HOME)
+                    sheet_write.write(r, col_ent, start_str, home_st)
+                    sheet_write.write(r, col_ex,  end_str,   home_st)
 
                     ent_f = time_str_to_float(start_str)
                     ex_f = time_str_to_float(end_str)
@@ -311,8 +341,9 @@ def main():
             sheet_write.write(r, 13, '', st)
 
             if not is_off_day(day_name):
-                # Deficit day (9 hours deficiency)
-                sheet_write.write(r, 14, '-09:00', row_style(r, 14))
+                # Deficit day — write -09:00 in red
+                neg_st = style_with_colour(row_style(r, 14), COLOUR_NEGATIVE)
+                sheet_write.write(r, 14, '-09:00', neg_st)
                 total_deficit_minutes += 9 * 60
             else:
                 sheet_write.write(r, 14, '', row_style(r, 14))
@@ -337,7 +368,9 @@ def main():
             daily_total_vals.append(net_total)
 
             mins = int(round(total_hours * 60))
-            sheet_write.write(r, 14, f"+{fmt_minutes(mins)}", row_style(r, 14))
+            # Weekend overtime → always positive, shown in green
+            pos_st = style_with_colour(row_style(r, 14), COLOUR_POSITIVE)
+            sheet_write.write(r, 14, f"+{fmt_minutes(mins)}", pos_st)
             total_surplus_minutes += mins
         else:
             # Regular weekday work
@@ -366,15 +399,16 @@ def main():
 
             diff_hours = total_hours - target_hours
             diff_mins  = int(round(diff_hours * 60))
-            diff_st    = row_style(r, 14)
             if diff_mins > 0:
-                sheet_write.write(r, 14, f"+{fmt_minutes(diff_mins)}", diff_st)
+                pos_st = style_with_colour(row_style(r, 14), COLOUR_POSITIVE)
+                sheet_write.write(r, 14, f"+{fmt_minutes(diff_mins)}", pos_st)
                 total_surplus_minutes += diff_mins
             elif diff_mins < 0:
-                sheet_write.write(r, 14, f"-{fmt_minutes(abs(diff_mins))}", diff_st)
+                neg_st = style_with_colour(row_style(r, 14), COLOUR_NEGATIVE)
+                sheet_write.write(r, 14, f"-{fmt_minutes(abs(diff_mins))}", neg_st)
                 total_deficit_minutes += abs(diff_mins)
             else:
-                sheet_write.write(r, 14, '+00:00', diff_st)
+                sheet_write.write(r, 14, '+00:00', row_style(r, 14))
 
     # 5. Write row 41 totals
     sum_regular_f = sum(val for val in daily_regular_vals if isinstance(val, float))
@@ -424,8 +458,9 @@ def main():
     sum_ot_f = sum_125_f + sum_150_f + sum_200_f
     sheet_write.write(52, 6, sum_ot_f if sum_ot_f > 0 else 0.0, row_style(52, 6))
 
-    # Row 53
-    sheet_write.write(53, 6, f"-{fmt_minutes(total_deficit_minutes)}", row_style(53, 6))
+    # Row 53 — cumulative deficit shown in red
+    sheet_write.write(53, 6, f"-{fmt_minutes(total_deficit_minutes)}",
+                      style_with_colour(row_style(53, 6), COLOUR_NEGATIVE))
 
     # 7. Save workbook
     wb.save(output_xls_path)
