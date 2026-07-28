@@ -921,6 +921,12 @@ def build_skeleton(sheet, layout, meta, styles, print_date_str):
     column widths/row heights, and the bottom summary block's labels and
     merged-cell grid. process_day()/write_summary_rows() fill in the values
     afterward (the sheet is created with cell_overwrite_ok=True)."""
+    # The real template's sheet is right-to-left (Hebrew) — column 0 renders
+    # on the right, not the left. This is a sheet-level flag, not a per-cell
+    # alignment; the template's own cells all use plain 'General'/center
+    # alignment and rely on this flag for the Hebrew reading direction.
+    sheet.cols_right_to_left = True
+
     widths = {13: 1719, 15: 2670}
     for c in range(16):
         sheet.col(c).width = widths.get(c, 2231)
