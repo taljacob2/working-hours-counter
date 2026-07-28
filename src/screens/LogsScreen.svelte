@@ -191,6 +191,14 @@
   let viewingEntryIdx = null  // null = current, 0 = before any rebalance, N = after N rebalances
   let _histMonthKey = null    // last month key for which history was loaded
 
+  // ── OT ceiling (optional "cut" on top of the normal rebalance) ─
+  let otCutEnabled = false
+  let otCutCeilingMs = null   // target ceiling in ms; null = not yet initialised for this cumOt
+
+  // Keep the ceiling valid as cumOt changes (month nav, or after an apply) — only ever
+  // clamp down/initialise, never fight the user's own drag.
+  $: if (showRebalancing && (otCutCeilingMs == null || otCutCeilingMs > cumOt)) otCutCeilingMs = Math.max(0, cumOt)
+
   function fmtKeyShort(key) {
     return new Date(key + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
   }
@@ -350,8 +358,8 @@
       )
     : null
 
-  // Per-cell delta map: key → net milliseconds shifted (negative = donated, positive = received)
-  $: rebalMap = (() => {
+  // Per-cell delta map from the normal donor→recipient rebalance alone (no OT cut).
+  $: baseRebalMap = (() => {
     if (!rebalancing) return {}
     const map = {}
     for (const t of rebalancing.transfers) {
@@ -360,6 +368,83 @@
     }
     return map
   })()
+
+  // How much OT to actually cut this round, given the user's chosen ceiling.
+  $: otCutAmountMs = (otCutEnabled && otCutCeilingMs != null) ? Math.max(0, cumOt - otCutCeilingMs) : 0
+
+  // Max ms a single day can actually give up in one shot, per computeDaySuggestion's own
+  // rules (it only ever shrinks/deletes ONE home session per apply). netMs - reqMs is just
+  // the day's theoretical OT — a lot of that can be office-sourced (never touched) or split
+  // across sessions too small to fully satisfy a big ask, so this simulates the real cap
+  // rather than trusting the theoretical number.
+  function achievableCutForDay(dk, netMs, reqMs, maxMs, commuteGapMins) {
+    const theoretical = netMs - reqMs
+    if (theoretical <= 0) return 0
+    const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
+    if (!dayLogs.length) return 0
+    const synthetic = { stillAboveMax: [], excessOtRecipients: new Set() }
+    const sugg = computeDaySuggestion(dayLogs, dk, synthetic, { [dk]: -theoretical }, maxMs, commuteGapMins, netMs)
+    return Math.abs(sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0)
+  }
+
+  // Per-cell ms to remove on top of baseRebalMap to bring cumulative OT down toward the
+  // chosen ceiling. Uses water-filling: find the common "water level" of remaining OT such
+  // that trimming every donor above it down to that level adds up to the requested cut.
+  // Largest-OT days give up the most, everyone touched lands at the same remaining OT, and
+  // days already below the level are left untouched — reads as ordinary daily variance
+  // rather than one day being conspicuously hollowed out.
+  $: cutMap = (() => {
+    if (!rebalancing || otCutAmountMs <= 0) return {}
+    const reqMs = $requiredHours * 3_600_000
+    const maxMs = $maximumDailyHours * 3_600_000
+    const daysWithHomeLogs = new Set(effectiveLogs.filter(l => l.platform === 'home').map(l => l.date_key))
+
+    const donors = calDays
+      .filter(c => c && c.count > 0 && !isOffDay(c.key, $offDays, $dayOverrides) && daysWithHomeLogs.has(c.key))
+      .filter(c => !rebalancing.stillAboveMax.includes(c.key)) // deltaMs there is fixed regardless of rebalMap
+      .filter(c => (baseRebalMap[c.key] ?? 0) >= 0) // skip days already donating in the normal rebalance — keeps the achievability check below unambiguous
+      .map(c => {
+        const theoreticalAvail = Math.max(0, c.netMs - reqMs)
+        if (theoreticalAvail <= 0) return { key: c.key, avail: 0 }
+        const achievable = achievableCutForDay(c.key, c.netMs, reqMs, maxMs, $commuteGapMinutes)
+        return { key: c.key, avail: Math.min(theoreticalAvail, achievable) }
+      })
+      .filter(d => d.avail > 0)
+
+    if (!donors.length) return {}
+    const totalAvail = donors.reduce((s, d) => s + d.avail, 0)
+    const target = Math.min(otCutAmountMs, totalAvail)
+    if (target <= 0) return {}
+
+    // Binary search the water level L where sum(max(0, avail_i - L)) == target.
+    let lo = 0, hi = Math.max(...donors.map(d => d.avail))
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2
+      const sum = donors.reduce((s, d) => s + Math.max(0, d.avail - mid), 0)
+      if (sum > target) lo = mid; else hi = mid
+    }
+    const level = hi
+
+    const map = {}
+    for (const d of donors) {
+      const cut = Math.round(Math.max(0, d.avail - level))
+      if (cut > 0) map[d.key] = -cut
+    }
+    return map
+  })()
+
+  // Total OT the cut can realistically achieve, given real per-day session capacity —
+  // may be less than otCutAmountMs if home-loggable time can't cover the full request.
+  $: otCutAchievableMs = Object.values(cutMap).reduce((s, v) => s - v, 0)
+
+  // Final per-cell delta map: normal rebalance + OT cut layered on top.
+  $: rebalMap = (() => {
+    const map = { ...baseRebalMap }
+    for (const [k, v] of Object.entries(cutMap)) map[k] = (map[k] ?? 0) + v
+    return map
+  })()
+
+  $: hasAdjustments = !!rebalancing && (rebalancing.transfers.length > 0 || Object.keys(cutMap).length > 0)
 
   // Per-day summary for the redesigned panel
   $: rebalSummary = (() => {
@@ -370,7 +455,8 @@
       if (!cell) continue
       // isExcessOt = this day received Pass-3 excess-OT hours (may also have received normal hours)
       const isExcessOt = rebalancing.excessOtRecipients.has(key)
-      const entry = { key, originalMs: cell.netMs, newMs: cell.netMs + deltaMs, deltaMs, isExcessOt }
+      const isOtCut = cutMap[key] != null
+      const entry = { key, originalMs: cell.netMs, newMs: cell.netMs + deltaMs, deltaMs, isExcessOt, isOtCut }
       if (deltaMs < 0) donors.push(entry)
       else             recipients.push(entry)
     }
@@ -384,14 +470,16 @@
   $: effectiveRebalMap = (() => {
     if (!rebalancing) return rebalMap
     const maxMs = $maximumDailyHours * 3_600_000
-    // Simulate each donor to measure actually-achievable ms reduction
+    // Simulate each NORMAL donor (not an OT-cut-only donor — that ms is being removed, not
+    // redistributed, so it must never inflate what recipients are allowed to draw) to measure
+    // actually-achievable ms reduction.
     let achievable = 0
-    for (const [dk, v] of Object.entries(rebalMap)) {
+    for (const [dk, v] of Object.entries(baseRebalMap)) {
       if (v >= 0) continue
       const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, rebalMap, maxMs, $commuteGapMinutes, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, baseRebalMap, maxMs, $commuteGapMinutes, netMs)
       achievable += Math.abs(sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0)
     }
     // Cap each recipient to at most what donors can actually deliver
@@ -435,8 +523,9 @@
       const currentOt = dayCell?.otMs ?? 0
       const isDonor    = (rebalMap[dk] ?? 0) < 0
       const isExcessOt = !isDonor && (rebalancing.excessOtRecipients?.has(dk) ?? false)
+      const isOtCut    = cutMap[dk] != null
       const noSuggestion = !sugg || delta === 0
-      breakdown.push({ dk, isDonor, isExcessOt, currentOt, projectedOt: currentOt + delta, delta, noSuggestion })
+      breakdown.push({ dk, isDonor, isExcessOt, isOtCut, currentOt, projectedOt: currentOt + delta, delta, noSuggestion })
       totalDelta += delta
     }
     if (!breakdown.length) return null
@@ -445,7 +534,12 @@
       const rank = r => r.isDonor ? 0 : r.isExcessOt ? 1 : 2
       return rank(a) - rank(b)
     })
-    const donorLoss    = breakdown.filter(r => r.isDonor).reduce((s, r) => s + Math.abs(r.delta), 0)
+    // Donor loss that's attributable to a deliberate OT cut is excluded here — that ms is
+    // meant to vanish, not be matched by a recipient, so it must never show up as "unplaced".
+    const donorLoss = breakdown.filter(r => r.isDonor).reduce((s, r) => {
+      const cutPortion = Math.abs(cutMap[r.dk] ?? 0)
+      return s + Math.max(0, Math.abs(r.delta) - cutPortion)
+    }, 0)
     const recipientGain = breakdown.filter(r => !r.isDonor).reduce((s, r) => s + Math.max(0, r.delta), 0)
     const unplacedMs   = Math.max(0, donorLoss - recipientGain)
     return { projectedOt: cumOt + totalDelta, delta: totalDelta, breakdown, unplacedMs }
@@ -883,7 +977,9 @@
     }
     const summary = {
       updates: updates.length, inserts: inserts.length, deletes: deletes.length,
-      otBefore, otAfter, dateKeys: [...affectedKeys]
+      otBefore, otAfter, dateKeys: [...affectedKeys],
+      otCutApplied: otCutEnabled && otCutAmountMs > 0,
+      otCutCeilingMs: otCutEnabled ? otCutCeilingMs : null
     }
     const { data: histData, error: histErr } = await sb
       .from('rebalance_history')
@@ -1109,7 +1205,7 @@
                 {:else}
                   <span class="badge badge-warning">Action Required</span>
                 {/if}
-                {#if rebalancing.transfers.length}
+                {#if hasAdjustments}
                   <button class="btn btn-sm btn-primary" style="font-size: 0.75rem;" on:click={applyAllRebalance} disabled={isSaving}>
                     ⚡ Apply All
                   </button>
@@ -1129,6 +1225,33 @@
               {/if}
               {#if rebalancing.stillUnderMin.length}
                 <span class="rebal-violation-item rebal-violation--min">⚠ Still under {$minimumDailyHours}h: {rebalancing.stillUnderMin.map(fmtKeyShort).join(', ')}</span>
+              {/if}
+            </div>
+          {/if}
+          {#if rebalancing && cumOt > 0}
+            <div class="ot-cut-box">
+              <label class="ot-cut-toggle">
+                <input type="checkbox" bind:checked={otCutEnabled} />
+                <span>✂ Cut reported OT to a lower ceiling</span>
+              </label>
+              {#if otCutEnabled}
+                <div class="ot-cut-controls">
+                  <input type="range" min="0" max={cumOt} step={15 * 60_000}
+                    bind:value={otCutCeilingMs} class="ot-cut-slider" />
+                  <span class="ot-cut-readout tabnum">Keep at most {fmtDuration(otCutCeilingMs ?? cumOt, true)}</span>
+                </div>
+                <p class="ot-cut-hint">
+                  {#if otCutAmountMs > 0 && otCutAchievableMs > 0}
+                    Will quietly trim {fmtDuration(otCutAchievableMs)} off the top — spread thin across your highest-OT days first, never below {$requiredHours}h on any day, so it still reads as ordinary day-to-day variance.
+                    {#if otCutAchievableMs < otCutAmountMs - 60_000}
+                      <strong>Only {fmtDuration(otCutAchievableMs)} of the requested {fmtDuration(otCutAmountMs)} can actually be trimmed</strong> — that's the most your logged home hours can supply in one pass. Projected OT will land around {fmtDuration(cumOt - otCutAchievableMs, true)}, above your {fmtDuration(otCutCeilingMs, true)} ceiling.
+                    {/if}
+                  {:else if otCutAmountMs > 0}
+                    None of the requested cut can be trimmed — there's no eligible home-logged time to remove (office-tracked hours are never touched).
+                  {:else}
+                    Ceiling is at or above your current OT — nothing will be cut.
+                  {/if}
+                </p>
               {/if}
             </div>
           {/if}
@@ -1163,7 +1286,13 @@
                   {#if otProjection.unplacedMs > 0}
                     <div class="ot-proj-step ot-proj-step--warn">
                       <span class="ot-proj-step-num">3</span>
-                      <span><strong>{fmtDuration(otProjection.unplacedMs)} could not be placed on any other day</strong> — every working day either already reached {$maximumDailyHours}h or had no free morning/evening slot. Those hours are trimmed with nowhere to go. <strong>This is the only reason OT decreases.</strong></span>
+                      <span><strong>{fmtDuration(otProjection.unplacedMs)} could not be placed on any other day</strong> — every working day either already reached {$maximumDailyHours}h or had no free morning/evening slot. Those hours are trimmed with nowhere to go.{#if !(otCutEnabled && otCutAmountMs > 0)} <strong>This is the only reason OT decreases.</strong>{/if}</span>
+                    </div>
+                  {/if}
+                  {#if otCutEnabled && otCutAmountMs > 0}
+                    <div class="ot-proj-step ot-proj-step--warn">
+                      <span class="ot-proj-step-num">{otProjection.unplacedMs > 0 ? '4' : '3'}</span>
+                      <span>You've also chosen to cut up to <strong>{fmtDuration(otCutAmountMs)}</strong> down to a ceiling of <strong>{fmtDuration(otCutCeilingMs, true)}</strong> — spread across your highest-OT days, largest first, never below {$requiredHours}h on any day.</span>
                     </div>
                   {/if}
                 </div>
@@ -1178,6 +1307,8 @@
                             <span class="pill pill-ot-neg" style="font-size:0.68rem;">Hours trimmed (over {$maximumDailyHours}h)</span>
                           {:else if row.isDonor && row.noSuggestion}
                             <span class="pill pill-warn" style="font-size:0.68rem;">OT donated — no home logs to trim</span>
+                          {:else if row.isDonor && row.isOtCut}
+                            <span class="pill pill-ot-neg" style="font-size:0.68rem;">✂ OT cut</span>
                           {:else if row.isDonor}
                             <span class="pill pill-ot-neg" style="font-size:0.68rem;">OT donated</span>
                           {:else if row.isExcessOt}
@@ -1201,7 +1332,7 @@
           {/if}
         </div>
 
-        {#if rebalancing && !rebalancing.transfers.length}
+        {#if rebalancing && !hasAdjustments}
           <div class="rebal-clean">
             <span class="rebal-clean-icon">&#10003;</span>
             <p>All logged days are already within {$minimumDailyHours}h–{$maximumDailyHours}h. Nothing to adjust.</p>
@@ -1231,6 +1362,9 @@
                   <span class="rebal-badge rebal-badge--donor">{fmtDuration(d.deltaMs, true)}</span>
                   {#if donorExcessMs > 0}
                     <span class="rebal-excess-tag">+{fmtDuration(donorExcessMs)}</span>
+                  {/if}
+                  {#if d.isOtCut}
+                    <span class="rebal-cut-tag">✂ OT cut</span>
                   {/if}
                   <span class="rebal-view-hint">&#9654; logs</span>
                 </button>
@@ -1757,6 +1891,28 @@
   .rebal-hd-title { font-weight: 700; font-size: 0.82rem; color: var(--color-text); }
   .rebal-hd-sub   { font-size: 0.72rem; color: var(--color-text-muted); margin-top: 1px; }
   .rebal-hd-hint  { font-size: 0.68rem; color: var(--color-primary); margin-top: 3px; opacity: 0.8; }
+  /* OT cut box */
+  .ot-cut-box {
+    margin-top: 0.5rem; width: 100%;
+    background: var(--color-surface-2); border: 1px solid var(--color-border);
+    border-radius: 6px; padding: 0.6rem 0.875rem;
+    display: flex; flex-direction: column; gap: 0.45rem;
+  }
+  .ot-cut-toggle {
+    display: flex; align-items: center; gap: 0.45rem;
+    font-size: 0.82rem; font-weight: 600; color: var(--color-text);
+    cursor: pointer;
+  }
+  .ot-cut-toggle input { cursor: pointer; }
+  .ot-cut-controls { display: flex; align-items: center; gap: 0.7rem; }
+  .ot-cut-slider { flex: 1; accent-color: var(--color-primary); }
+  .ot-cut-readout { font-size: 0.8rem; font-weight: 700; white-space: nowrap; color: var(--color-text); }
+  .ot-cut-hint { font-size: 0.72rem; color: var(--color-text-muted); line-height: 1.4; margin: 0; }
+  .rebal-cut-tag {
+    font-size: 0.66rem; font-weight: 700; color: hsl(38 95% 40%);
+    background: color-mix(in srgb, hsl(38 95% 55%) 15%, transparent);
+    border-radius: 4px; padding: 0.1rem 0.35rem; white-space: nowrap;
+  }
   /* OT projection box */
   .ot-projection-box {
     margin-top: 0.5rem; width: 100%;
