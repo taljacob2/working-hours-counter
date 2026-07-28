@@ -1,11 +1,13 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
   import { requestNotificationPermission } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
   import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
+  import GenerateReportButton from '../components/GenerateReportButton.svelte'
+  import CollapsibleSection from '../components/CollapsibleSection.svelte'
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -21,6 +23,74 @@
 
   let rebalHistoryCapLocal = 0
   rebalHistoryCap.subscribe(v => rebalHistoryCapLocal = v)
+
+  let companyNameLocal = ''
+  companyName.subscribe(v => companyNameLocal = v)
+  let employeeNameLocal = ''
+  employeeName.subscribe(v => employeeNameLocal = v)
+  let employeeCodeLocal = ''
+  employeeCode.subscribe(v => employeeCodeLocal = v)
+  let cardNumberLocal = ''
+  cardNumber.subscribe(v => cardNumberLocal = v)
+  let payrollNumberLocal = ''
+  payrollNumber.subscribe(v => payrollNumberLocal = v)
+  let employmentStartDateLocal = ''
+  employmentStartDate.subscribe(v => employmentStartDateLocal = v)
+  let workAgreementTextLocal = ''
+  workAgreementText.subscribe(v => workAgreementTextLocal = v)
+
+  let headerFileInput
+  let parsingHeader = false
+
+  // 'DD/MM/YY' (vendor format) -> 'YYYY-MM-DD' (<input type="date"> format)
+  function vendorDateToIso(vendorDate) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(vendorDate || '')
+    if (!m) return ''
+    const [, d, mo, yy] = m
+    return `20${yy}-${mo}-${d}`
+  }
+
+  async function handleHeaderFileSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    parsingHeader = true
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+      let binary = ''
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+      const base64 = btoa(binary)
+
+      const res = await fetch('/api/parse-xls-header', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xlsBase64: base64 }),
+      })
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}))
+        throw new Error(errJson.error || 'שגיאת שרת לא ידועה')
+      }
+      const parsed = await res.json()
+
+      companyNameLocal = parsed.companyName || companyNameLocal
+      employeeNameLocal = parsed.employeeName || employeeNameLocal
+      employeeCodeLocal = parsed.employeeCode || employeeCodeLocal
+      cardNumberLocal = parsed.cardNumber || cardNumberLocal
+      payrollNumberLocal = parsed.payrollNumber || payrollNumberLocal
+      workAgreementTextLocal = parsed.agreementText || workAgreementTextLocal
+      const iso = vendorDateToIso(parsed.startDate)
+      if (iso) employmentStartDateLocal = iso
+
+      await saveSettings()
+      showToast('הפרטים נטענו ונשמרו בהצלחה ✓', 'success')
+    } catch (err) {
+      console.error(err)
+      showToast('טעינת הפרטים נכשלה: ' + err.message, 'error')
+    } finally {
+      parsingHeader = false
+      if (headerFileInput) headerFileInput.value = ''
+    }
+  }
 
   let notifMorningEnabledLocal = false
   notifMorningEnabled.subscribe(v => notifMorningEnabledLocal = v)
@@ -87,6 +157,21 @@
     rebalHistoryCap.set(rebalHistoryCapLocal)
     localStorage.setItem('whl_rebal_history_cap', String(rebalHistoryCapLocal))
 
+    companyName.set(companyNameLocal)
+    localStorage.setItem('whl_company_name', companyNameLocal)
+    employeeName.set(employeeNameLocal)
+    localStorage.setItem('whl_employee_name', employeeNameLocal)
+    employeeCode.set(employeeCodeLocal)
+    localStorage.setItem('whl_employee_code', employeeCodeLocal)
+    cardNumber.set(cardNumberLocal)
+    localStorage.setItem('whl_card_number', cardNumberLocal)
+    payrollNumber.set(payrollNumberLocal)
+    localStorage.setItem('whl_payroll_number', payrollNumberLocal)
+    employmentStartDate.set(employmentStartDateLocal)
+    localStorage.setItem('whl_employment_start_date', employmentStartDateLocal)
+    workAgreementText.set(workAgreementTextLocal)
+    localStorage.setItem('whl_work_agreement_text', workAgreementTextLocal)
+
     // If the off-days configuration changed, clear all per-date overrides — they were
     // set relative to the old config and would silently shadow the new one.
     const offDaysChanged = [...$offDays].sort().join(',') !== [...offDaysLocal].sort().join(',')
@@ -125,6 +210,13 @@
       { key: 'notifEveningTime',    value: notifEveningTimeLocal },
       { key: 'notifTargetEnabled',  value: String(notifTargetEnabledLocal) },
       { key: 'notifTargetHoursOverride', value: notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '' },
+      { key: 'companyName', value: companyNameLocal },
+      { key: 'employeeName', value: employeeNameLocal },
+      { key: 'employeeCode', value: employeeCodeLocal },
+      { key: 'cardNumber', value: cardNumberLocal },
+      { key: 'payrollNumber', value: payrollNumberLocal },
+      { key: 'employmentStartDate', value: employmentStartDateLocal },
+      { key: 'workAgreementText', value: workAgreementTextLocal },
     ]
     if (offDaysChanged) upsertRows.push({ key: 'dayOverrides', value: '{}' })
     const { error } = await sb.from('work_settings').upsert(upsertRows)
@@ -478,10 +570,11 @@
 <div class="settings-screen">
   <h1 class="page-title">Settings</h1>
 
-  <!-- Preferences -->
-  <div class="card">
-    <p class="section-title">Preferences</p>
-    
+  <button class="btn btn-primary btn-full" style="margin-bottom:1.5rem" on:click={saveSettings}>
+    💾 Save settings
+  </button>
+
+  <CollapsibleSection title="Work Hours & Preferences" icon="🕐" open={true}>
     <div style="margin-bottom: 1.5rem">
       <label>Required Daily Hours</label>
       <div class="hours-row" style="margin-top: 0.25rem">
@@ -602,9 +695,13 @@
       </p>
     </div>
 
-    <!-- Notifications -->
     <hr class="divider" />
-    <p class="section-title">Notifications</p>
+    <p class="info-text">
+      <strong>How overtime works:</strong> Daily OT = net worked − required hours. Cumulative monthly OT = sum of daily OTs for days with at least one log. Days with no logs (weekends, holidays) are not penalised.
+    </p>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Notifications" icon="🔔">
     {#if !window?.Capacitor?.isNativePlatform?.()}
       <p class="info-text" style="margin-bottom: 0.75rem; font-size: 0.78rem;">
         Notifications only fire on the Android app. Settings saved here sync via Supabase and take effect next time the app opens.
@@ -684,18 +781,9 @@
         </div>
       {/if}
 
-    <button class="btn btn-primary btn-full" style="margin-top:1.5rem" on:click={saveSettings}>
-      💾 Save settings
-    </button>
+  </CollapsibleSection>
 
-    <hr class="divider" />
-    <p class="info-text">
-      <strong>How overtime works:</strong> Daily OT = net worked − required hours. Cumulative monthly OT = sum of daily OTs for days with at least one log. Days with no logs (weekends, holidays) are not penalised.
-    </p>
-  </div>
-
-  <!-- Export -->
-  <div class="card">
+  <CollapsibleSection title="Data Import &amp; Export" icon="💾">
     <p class="section-title">Export Logs by Month</p>
     <div class="export-row">
       <select bind:value={expYear} style="width:100px">
@@ -732,12 +820,8 @@
     {#if expCount !== null}
       <p class="export-count">{expCount} record{expCount !== 1 ? 's' : ''} for this month</p>
     {/if}
-  </div>
 
-  <ExcelMergeButton />
-
-  <!-- Import -->
-  <div class="card">
+    <hr class="divider" style="margin: 1.25rem 0" />
     <p class="section-title">Import Logs from JSON</p>
     <div class="import-modes">
       <div class="import-mode">
@@ -764,11 +848,65 @@
         {importing ? '⏳…' : '⬆ Replace'}
       </button>
     </div>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Excel Reports" icon="📊">
+    <ExcelMergeButton />
+
+    <div class="card">
+    <p class="section-title">פרטי עובד וחברה (לדוח שנוצר מאפס)</p>
+    <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי. ניתן למלא אותם ידנית, או לייבא אותם אוטומטית מקובץ חברה קיים.</p>
+
+    <button type="button" class="btn btn-secondary" style="width:100%; margin-top:0.5rem" on:click={() => headerFileInput.click()} disabled={parsingHeader}>
+      {parsingHeader ? '⏳ מייבא ושומר...' : '⬆ ייבוא פרטים מקובץ חברה (Import)'}
+    </button>
+    <p class="info-text" style="margin-top: 0.35rem; font-size: 0.78rem;">
+      הפרטים ייקראו מהכותרת של הקובץ ויישמרו מיד ב-Supabase, בדיוק כמו לחיצה על "שמור הגדרות".
+    </p>
+    <input type="file" accept=".xls" bind:this={headerFileInput} on:change={handleHeaderFileSelect} style="display:none" />
+
+    <div style="margin-top: 0.75rem">
+      <label>שם חברה</label>
+      <input type="text" bind:value={companyNameLocal} placeholder="לדוגמה: אי אנד איי מערכות תו" style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>שם עובד</label>
+      <input type="text" bind:value={employeeNameLocal} placeholder="שם מלא" style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>קוד עובד</label>
+      <input type="text" bind:value={employeeCodeLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>מספר כרטיס</label>
+      <input type="text" bind:value={cardNumberLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>מס. בתוכנת שכר</label>
+      <input type="text" bind:value={payrollNumberLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>תאריך תחילת עבודה</label>
+      <input type="date" bind:value={employmentStartDateLocal} style="width:100%; margin-top:0.25rem" />
+    </div>
+    <div style="margin-top: 0.75rem">
+      <label>הסכם עבודה</label>
+      <input type="text" bind:value={workAgreementTextLocal} placeholder="לדוגמה: הסכם נוספות 9" style="width:100%; margin-top:0.25rem" />
+    </div>
   </div>
 
-  <!-- Office Auto-Track -->
-  <div class="card">
-    <p class="section-title">Office Auto-Track (GPS)</p>
+    <GenerateReportButton
+      companyName={companyNameLocal}
+      employeeName={employeeNameLocal}
+      employeeCode={employeeCodeLocal}
+      cardNumber={cardNumberLocal}
+      payrollNumber={payrollNumberLocal}
+      employmentStartDate={employmentStartDateLocal}
+      workAgreementText={workAgreementTextLocal}
+    />
+  </CollapsibleSection>
+
+  <CollapsibleSection title="Office Auto-Track (GPS)" icon="📍">
     <p class="info-text">
       Automatically resume/pause the <strong>Office</strong> timer when you arrive at or leave a saved location.
       {#if !window?.Capacitor?.isNativePlatform?.()}
@@ -878,17 +1016,15 @@
         Go to your office, enter a name (optional), then tap Add. Your GPS position will be saved.
       </p>
     {/if}
-  </div>
+  </CollapsibleSection>
 
-  <!-- Account / Reconfigure -->
-  <div class="card">
-    <p class="section-title">Account &amp; Connection</p>
+  <CollapsibleSection title="Account &amp; Connection" icon="👤">
     <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
     <div class="account-actions">
       <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
       <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
     </div>
-  </div>
+  </CollapsibleSection>
 </div>
 
 <style>

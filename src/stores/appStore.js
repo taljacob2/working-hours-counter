@@ -47,6 +47,17 @@ export const excelColorHomeHours = writable(false)
 // free slot in orange, flagging it for HR to confirm. Defaults on.
 export const fillMissingOfficeHours = writable(true)
 
+// ── Report generation (from-scratch company sheet) ────────────
+// Only needed if the user wants to generate a company-style report without
+// uploading the official file — see generate_hours.py / GenerateReportButton.
+export const companyName         = writable('')
+export const employeeName        = writable('')
+export const employeeCode        = writable('')
+export const cardNumber          = writable('')
+export const payrollNumber       = writable('')
+export const employmentStartDate = writable('') // 'YYYY-MM-DD'
+export const workAgreementText   = writable('')
+
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')
 export const toasts = writable([])
