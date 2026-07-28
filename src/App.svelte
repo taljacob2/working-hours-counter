@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -200,6 +200,9 @@
       const nthoLocal = localStorage.getItem('whl_notif_target_hours')
       const nthoRaw = ntho ?? nthoLocal ?? ''
       notifTargetHoursOverride.set(nthoRaw && nthoRaw !== '' ? parseFloat(nthoRaw) : null)
+
+      const echh = settings?.find(s => s.key === 'excelColorHomeHours')?.value
+      excelColorHomeHours.set((echh ?? localStorage.getItem('whl_excel_color_home') ?? 'false') === 'true')
     } catch (e) {
       console.error('loadAll error', e)
     } finally {

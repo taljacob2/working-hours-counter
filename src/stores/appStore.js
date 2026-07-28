@@ -39,6 +39,10 @@ export const notifTargetEnabled  = writable(false)
 // null = use requiredHours; number = custom hours override
 export const notifTargetHoursOverride = writable(null)
 
+// ── Excel merge ───────────────────────────────────────────────
+// When true, home-hours intervals are written in a distinct colour in merged XLS files.
+export const excelColorHomeHours = writable(false)
+
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')
 export const toasts = writable([])

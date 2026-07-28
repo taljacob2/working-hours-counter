@@ -14,6 +14,7 @@ COLOUR_DEFAULT  = 8   # Black       — regular office / data cells
 COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime
 COLOUR_NEGATIVE = 10  # Red         — deficit
 COLOUR_VACATION = 12  # Blue        — vacation (חופש)
+COLOUR_HOME     = 49  # Teal/Cyan   — optional colour for inserted home intervals
 
 
 def font_colour_at(rb, sheet, row, col):
@@ -226,12 +227,13 @@ def is_off_day(day_name):
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls>")
+        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> [color_home_hours]")
         sys.exit(1)
 
     input_xls_path = sys.argv[1]
     logs_json_path = sys.argv[2]
     output_xls_path = sys.argv[3]
+    color_home_hours = len(sys.argv) > 4 and sys.argv[4].strip().lower() == 'true'
 
     if not os.path.exists(input_xls_path):
         print(f"Input file not found: {input_xls_path}")
@@ -357,7 +359,8 @@ def main():
         # Sort home logs by start time
         day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
         
-        # Merge home intervals — same font/size as office cells (default colour)
+        # Merge home intervals — same font/size as office cells;
+        # colour is optionally overridden to COLOUR_HOME per user setting.
         curr_p = len(xls_intervals)
         for log in day_home_logs:
             if curr_p < 3:
@@ -366,8 +369,13 @@ def main():
                 if start_str and end_str:
                     col_ent = 2 + 2 * curr_p
                     col_ex = 3 + 2 * curr_p
-                    sheet_write.write(r, col_ent, start_str, row_style(r, col_ent))
-                    sheet_write.write(r, col_ex,  end_str,   row_style(r, col_ex))
+                    ent_style = row_style(r, col_ent)
+                    ex_style = row_style(r, col_ex)
+                    if color_home_hours:
+                        ent_style = style_with_colour(ent_style, COLOUR_HOME)
+                        ex_style = style_with_colour(ex_style, COLOUR_HOME)
+                    sheet_write.write(r, col_ent, start_str, ent_style)
+                    sheet_write.write(r, col_ex,  end_str,   ex_style)
 
                     ent_f = time_str_to_float(start_str)
                     ex_f = time_str_to_float(end_str)

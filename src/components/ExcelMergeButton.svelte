@@ -1,9 +1,21 @@
 <script>
-  import { logs, calCursor, showToast, loading } from '../stores/appStore.js'
-  
+  import { logs, calCursor, showToast, loading, excelColorHomeHours } from '../stores/appStore.js'
+  import { getSupabase } from '../lib/supabase.js'
+
   let fileInput
   let uploadEl
   let isDragging = false
+
+  let colorHomeHoursLocal = false
+  excelColorHomeHours.subscribe(v => colorHomeHoursLocal = v)
+
+  async function toggleColorHomeHours(checked) {
+    colorHomeHoursLocal = checked
+    excelColorHomeHours.set(checked)
+    localStorage.setItem('whl_excel_color_home', String(checked))
+    const sb = getSupabase()
+    await sb.from('work_settings').upsert([{ key: 'excelColorHomeHours', value: String(checked) }])
+  }
   
   // Format local Date to HH:MM (24h)
   function formatLocalHM(tsStr) {
@@ -108,7 +120,8 @@
             },
             body: JSON.stringify({
               xlsBase64: base64,
-              logs: homeIntervals
+              logs: homeIntervals,
+              colorHomeHours: colorHomeHoursLocal
             })
           })
           
@@ -196,6 +209,15 @@
     <span class="alert-icon">💡</span>
     <p>שעות העבודה מהבית ימוזגו לתוך עמודות הכניסה/יציאה המשניות (כניסה 2 ויציאה 2) בהתאמה לכל יום עבודה.</p>
   </div>
+
+  <label class="color-toggle-row">
+    <input
+      type="checkbox"
+      checked={colorHomeHoursLocal}
+      on:change={e => toggleColorHomeHours(e.target.checked)}
+    />
+    <span>צבע את שעות הבית שהוספנו בגוון ייחודי (בנוסף לצבעי החברה לחריגות/חופש)</span>
+  </label>
 </div>
 
 <style>
@@ -294,5 +316,21 @@
     font-size: 0.8125rem;
     color: var(--color-text-muted);
     line-height: 1.4;
+  }
+
+  .color-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    font-size: 0.8125rem;
+    color: var(--color-text);
+    font-weight: normal;
+    cursor: pointer;
+  }
+
+  .color-toggle-row input {
+    cursor: pointer;
+    flex-shrink: 0;
   }
 </style>

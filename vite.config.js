@@ -19,13 +19,14 @@ export default defineConfig({
             req.on('data', chunk => { body += chunk })
             req.on('end', () => {
               try {
-                const { xlsBase64, logs } = JSON.parse(body)
+                const { xlsBase64, logs, colorHomeHours } = JSON.parse(body)
                 if (!xlsBase64 || !logs) {
                   res.statusCode = 400
                   res.setHeader('Content-Type', 'application/json')
                   res.end(JSON.stringify({ error: 'Missing xlsBase64 or logs' }))
                   return
                 }
+                const colorHomeHoursArg = colorHomeHours === true ? 'true' : 'false'
 
                 const id = Math.random().toString(36).substring(7)
                 const tempIn = `_temp_in_${id}.xls`
@@ -35,7 +36,7 @@ export default defineConfig({
                 writeFileSync(tempIn, Buffer.from(xlsBase64, 'base64'))
                 writeFileSync(tempLogs, JSON.stringify(logs))
 
-                exec(`python merge_hours.py "${tempIn}" "${tempLogs}" "${tempOut}"`, (error, stdout, stderr) => {
+                exec(`python merge_hours.py "${tempIn}" "${tempLogs}" "${tempOut}" ${colorHomeHoursArg}`, (error, stdout, stderr) => {
                   const cleanup = () => {
                     try { if (existsSync(tempIn)) unlinkSync(tempIn) } catch(e){}
                     try { if (existsSync(tempLogs)) unlinkSync(tempLogs) } catch(e){}
