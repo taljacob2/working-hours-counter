@@ -42,6 +42,10 @@ export const notifTargetHoursOverride = writable(null)
 // ── Excel merge ───────────────────────────────────────────────
 // When true, home-hours intervals are written in a distinct colour in merged XLS files.
 export const excelColorHomeHours = writable(false)
+// When true, an office session the app recorded but the company's sheet never
+// detailed (whole day has no company-provided time entries) is backfilled into a
+// free slot in orange, flagging it for HR to confirm. Defaults on.
+export const fillMissingOfficeHours = writable(true)
 
 // ── UI state ──────────────────────────────────────────────────
 export const theme = writable('light')

@@ -15,6 +15,8 @@ COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime
 COLOUR_NEGATIVE = 10  # Red         — deficit
 COLOUR_VACATION = 12  # Blue        — vacation (חופש)
 COLOUR_HOME     = 49  # Teal/Cyan   — optional colour for inserted home intervals
+COLOUR_OFFICE_GAP = 46  # Orange     — office hours backfilled from the app, not yet
+                        # confirmed by the company's own attendance system
 
 
 def font_colour_at(rb, sheet, row, col):
@@ -283,7 +285,8 @@ def is_off_day(day_name):
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> [color_home_hours] [day_overrides_json]")
+        print("Usage: python merge_hours.py <input_xls> <logs_json> <output_xls> "
+              "[color_home_hours] [day_overrides_json] [fill_missing_office]")
         sys.exit(1)
 
     input_xls_path = sys.argv[1]
@@ -304,6 +307,13 @@ def main():
         except Exception as e:
             print(f"Error loading day overrides JSON: {e}")
             day_overrides = {}
+
+    # Whether to backfill an office session the app recorded but the company's own
+    # file never got around to detailing. Defaults to on (matches the in-app
+    # toggle's default) so a bare CLI invocation without this arg still does it.
+    fill_missing_office = True
+    if len(sys.argv) > 6:
+        fill_missing_office = sys.argv[6].strip().lower() == 'true'
 
     if not os.path.exists(input_xls_path):
         print(f"Input file not found: {input_xls_path}")
@@ -455,26 +465,49 @@ def main():
                 occupied[p] = (ent, ex)
 
         free_slots = [p for p in range(3) if p not in occupied]
+        # Whole-day check: did the company's own file have ANY real time entry for
+        # this day at all, before we touched anything? If so, we leave office
+        # backfill alone entirely — even a different/partial session recorded by
+        # them means we don't try to reconcile or duplicate what they already have.
+        company_had_any_data = len(occupied) > 0
 
-        # Read Home intervals for this day from JSON, chronologically
-        day_home_logs = logs_by_date.get(date_str, [])
-        day_home_logs = sorted(day_home_logs, key=lambda x: x.get("start", ""))
-        valid_home_logs = [log for log in day_home_logs if log.get("start") and log.get("end")]
+        # Read this day's app logs, split by platform.
+        day_logs_all = logs_by_date.get(date_str, [])
+        day_home_logs = sorted(
+            (log for log in day_logs_all if log.get("platform") == "home" and log.get("start") and log.get("end")),
+            key=lambda x: x["start"]
+        )
+        day_office_logs = sorted(
+            (log for log in day_logs_all if log.get("platform") == "office" and log.get("start") and log.get("end")),
+            key=lambda x: x["start"]
+        )
+
+        # Candidates to merge into free slots, in chronological order. Home logs
+        # are always eligible. Office logs are only eligible when the company's
+        # sheet has nothing at all for this day (fill_missing_office) — a
+        # self-reported office session that isn't yet in the official record,
+        # flagged with a distinct colour so HR notices and can confirm it.
+        candidates = [dict(log, _source="home") for log in day_home_logs]
+        if fill_missing_office and not company_had_any_data:
+            candidates += [dict(log, _source="office_backfill") for log in day_office_logs]
+        candidates.sort(key=lambda x: x["start"])
 
         # Fill only the genuinely-free slots, in chronological order — never the
-        # company's own occupied ones. Colour is optionally overridden to
-        # COLOUR_HOME per user setting.
-        placed_count = min(len(free_slots), len(valid_home_logs))
+        # company's own occupied ones.
+        placed_count = min(len(free_slots), len(candidates))
         for i in range(placed_count):
             p = free_slots[i]
-            log = valid_home_logs[i]
+            log = candidates[i]
             start_str = log["start"]
             end_str = log["end"]
             col_ent = 2 + 2 * p
             col_ex = 3 + 2 * p
             ent_style = row_style(r, col_ent)
             ex_style = row_style(r, col_ex)
-            if color_home_hours:
+            if log["_source"] == "office_backfill":
+                ent_style = style_with_colour(ent_style, COLOUR_OFFICE_GAP)
+                ex_style = style_with_colour(ex_style, COLOUR_OFFICE_GAP)
+            elif color_home_hours:
                 ent_style = style_with_colour(ent_style, COLOUR_HOME)
                 ex_style = style_with_colour(ex_style, COLOUR_HOME)
             sheet_write.write(r, col_ent, start_str, ent_style)
@@ -484,18 +517,20 @@ def main():
         xls_intervals = list(occupied.values())
 
         # Overflow: more real work intervals than the sheet's fixed 3 entry/exit
-        # slots can show (e.g. several short fragmented home sessions on a single
-        # day). We never fabricate or stretch a displayed time to absorb this —
-        # doing so would misrepresent when the person actually worked. Instead its
-        # duration is folded straight into the day's total/OT math below, so pay
-        # and overtime stay accurate even though the extra session isn't itemised.
-        overflow_logs = valid_home_logs[placed_count:]
+        # slots can show (e.g. several short fragmented home sessions, or a home +
+        # backfilled-office day that's already full). We never fabricate or
+        # stretch a displayed time to absorb this — doing so would misrepresent
+        # when the person actually worked. Instead its duration is folded straight
+        # into the day's total/OT math below, so pay and overtime stay accurate
+        # even though the extra session isn't itemised.
+        overflow_logs = candidates[placed_count:]
         overflow_total = sum(
             time_str_to_float(log["end"]) - time_str_to_float(log["start"])
             for log in overflow_logs
         )
         if overflow_logs:
-            print(f"Note: {date_str} has {len(overflow_logs)} extra home session(s) beyond the "
+            kinds = ", ".join(sorted({log["_source"] for log in overflow_logs}))
+            print(f"Note: {date_str} has {len(overflow_logs)} extra session(s) ({kinds}) beyond the "
                   f"sheet's 3 entry/exit slots; their time is added to the day's total but not itemised.")
 
         # Calculate daily totals

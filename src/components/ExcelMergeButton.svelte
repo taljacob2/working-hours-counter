@@ -1,5 +1,5 @@
 <script>
-  import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides } from '../stores/appStore.js'
+  import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours } from '../stores/appStore.js'
   import { getSupabase } from '../lib/supabase.js'
 
   let fileInput
@@ -16,6 +16,17 @@
     const sb = getSupabase()
     await sb.from('work_settings').upsert([{ key: 'excelColorHomeHours', value: String(checked) }])
   }
+
+  let fillMissingOfficeLocal = true
+  fillMissingOfficeHours.subscribe(v => fillMissingOfficeLocal = v)
+
+  async function toggleFillMissingOffice(checked) {
+    fillMissingOfficeLocal = checked
+    fillMissingOfficeHours.set(checked)
+    localStorage.setItem('whl_fill_missing_office', String(checked))
+    const sb = getSupabase()
+    await sb.from('work_settings').upsert([{ key: 'fillMissingOfficeHours', value: String(checked) }])
+  }
   
   // Format local Date to HH:MM (24h)
   function formatLocalHM(tsStr) {
@@ -28,6 +39,38 @@
   // Get month name in Hebrew/English
   function getMonthName(date) {
     return date.toLocaleString('he-IL', { month: 'long', year: 'numeric' })
+  }
+
+  // Pair resume/pause events into { date, start, end, platform } intervals for one platform
+  function buildIntervalsForPlatform(monthLogs, platform) {
+    const sortedLogs = monthLogs
+      .filter(l => l.platform === platform)
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+
+    const intervals = []
+    const dayGroups = {}
+    for (const log of sortedLogs) {
+      if (!dayGroups[log.date_key]) dayGroups[log.date_key] = []
+      dayGroups[log.date_key].push(log)
+    }
+
+    for (const [dateKey, dayLogs] of Object.entries(dayGroups)) {
+      let openResume = null
+      for (const log of dayLogs) {
+        if (log.action === 'resume') {
+          openResume = log
+        } else if (log.action === 'pause' && openResume) {
+          intervals.push({
+            date: dateKey,
+            start: formatLocalHM(openResume.timestamp),
+            end: formatLocalHM(log.timestamp),
+            platform
+          })
+          openResume = null
+        }
+      }
+    }
+    return intervals
   }
   
   async function handleFileSelect(e) {
@@ -68,37 +111,14 @@
       const targetMonth = $calCursor.getMonth() + 1
       const prefix = `${targetYear}-${String(targetMonth).padStart(2, '0')}`
       
-      // 2. Filter home logs in memory
-      // Sort logs by timestamp ascending
-      const sortedLogs = [...$logs]
-        .filter(l => l.platform === 'home' && l.date_key.startsWith(prefix))
-        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-      
-      // Pair resume/pause events into intervals
-      const homeIntervals = []
-      const dayGroups = {}
-      
-      for (const log of sortedLogs) {
-        if (!dayGroups[log.date_key]) dayGroups[log.date_key] = []
-        dayGroups[log.date_key].push(log)
-      }
-      
-      for (const [dateKey, dayLogs] of Object.entries(dayGroups)) {
-        let openResume = null
-        for (const log of dayLogs) {
-          if (log.action === 'resume') {
-            openResume = log
-          } else if (log.action === 'pause' && openResume) {
-            homeIntervals.push({
-              date: dateKey,
-              start: formatLocalHM(openResume.timestamp),
-              end: formatLocalHM(log.timestamp)
-            })
-            openResume = null
-          }
-        }
-      }
-      
+      // 2. Filter this month's logs and pair resume/pause events into intervals,
+      // per platform. Office intervals are only used by the backend to backfill a
+      // day the company's own sheet never detailed — never to override real data.
+      const monthLogs = [...$logs].filter(l => l.date_key.startsWith(prefix))
+      const homeIntervals = buildIntervalsForPlatform(monthLogs, 'home')
+      const officeIntervals = buildIntervalsForPlatform(monthLogs, 'office')
+      const allIntervals = [...homeIntervals, ...officeIntervals]
+
       // 3. Read file as ArrayBuffer and convert to Base64
       const reader = new FileReader()
       reader.onload = async (event) => {
@@ -120,9 +140,10 @@
             },
             body: JSON.stringify({
               xlsBase64: base64,
-              logs: homeIntervals,
+              logs: allIntervals,
               colorHomeHours: colorHomeHoursLocal,
-              dayOverrides: $dayOverrides
+              dayOverrides: $dayOverrides,
+              fillMissingOffice: fillMissingOfficeLocal
             })
           })
           
@@ -218,6 +239,15 @@
       on:change={e => toggleColorHomeHours(e.target.checked)}
     />
     <span>צבע את שעות הבית שהוספנו בגוון ייחודי (בנוסף לצבעי החברה לחריגות/חופש)</span>
+  </label>
+
+  <label class="color-toggle-row">
+    <input
+      type="checkbox"
+      checked={fillMissingOfficeLocal}
+      on:change={e => toggleFillMissingOffice(e.target.checked)}
+    />
+    <span>השלם שעות משרד שהאפליקציה תיעדה אך טרם פורטו בקובץ החברה (מסומן בכתום עבור משאבי אנוש)</span>
   </label>
 </div>
 
