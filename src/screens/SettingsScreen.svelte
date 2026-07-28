@@ -5,6 +5,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
+  import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -732,6 +733,8 @@
       <p class="export-count">{expCount} record{expCount !== 1 ? 's' : ''} for this month</p>
     {/if}
   </div>
+
+  <ExcelMergeButton />
 
   <!-- Import -->
   <div class="card">
