@@ -260,6 +260,12 @@ def parse_xls_time(val):
         return time_str_to_float(val)
     return None
 
+def float_to_time_str(frac):
+    """Inverse of time_str_to_float: a fraction-of-day back to an 'HH:MM' string."""
+    total_minutes = int(round(frac * 24 * 60)) % (24 * 60)
+    h, m = divmod(total_minutes, 60)
+    return f"{h:02d}:{m:02d}"
+
 def parse_diff_str(s):
     if not s or not isinstance(s, str):
         return 0
@@ -493,18 +499,18 @@ def main():
         candidates.sort(key=lambda x: x["start"])
 
         # Fill only the genuinely-free slots, in chronological order — never the
-        # company's own occupied ones.
+        # company's own occupied ones. Track which slots we personally wrote (and
+        # their source) so overflow below can only ever extend our own data, never
+        # a slot the company already filled.
+        self_filled_source = {}  # slot index -> "home" | "office_backfill"
         placed_count = min(len(free_slots), len(candidates))
-        for i in range(placed_count):
-            p = free_slots[i]
-            log = candidates[i]
-            start_str = log["start"]
-            end_str = log["end"]
+
+        def write_slot(p, start_str, end_str, source):
             col_ent = 2 + 2 * p
             col_ex = 3 + 2 * p
             ent_style = row_style(r, col_ent)
             ex_style = row_style(r, col_ex)
-            if log["_source"] == "office_backfill":
+            if source == "office_backfill":
                 ent_style = style_with_colour(ent_style, COLOUR_OFFICE_GAP)
                 ex_style = style_with_colour(ex_style, COLOUR_OFFICE_GAP)
             elif color_home_hours:
@@ -513,28 +519,53 @@ def main():
             sheet_write.write(r, col_ent, start_str, ent_style)
             sheet_write.write(r, col_ex,  end_str,   ex_style)
             occupied[p] = (time_str_to_float(start_str), time_str_to_float(end_str))
+            self_filled_source[p] = source
+
+        for i in range(placed_count):
+            p = free_slots[i]
+            log = candidates[i]
+            write_slot(p, log["start"], log["end"], log["_source"])
+
+        # Overflow: more real work intervals than the sheet's fixed 3 entry/exit
+        # slots can show (e.g. several short fragmented home sessions on a fast
+        # day, or a home + backfilled-office day that's already full). The sheet
+        # has no room for a 4th column pair, so each overflow session's duration
+        # is folded into the boundary of whichever slot we ourselves just wrote
+        # that sits closest to it in time — extending that slot's displayed entry
+        # or exit to actually cover the extra minutes. This keeps every minute in
+        # the day's total physically present in a visible cell (nothing is added
+        # to the total that isn't backed by a shown log time), and never touches
+        # a slot holding the company's own pre-existing data.
+        for log in candidates[placed_count:]:
+            ov_start = time_str_to_float(log["start"])
+            ov_end   = time_str_to_float(log["end"])
+            ov_dur   = ov_end - ov_start
+            if ov_dur <= 0 or not self_filled_source:
+                continue
+
+            attach_candidates = []  # (gap, slot, extend_forward)
+            for p in self_filled_source:
+                s_ent, s_ex = occupied[p]
+                if ov_start >= s_ex:
+                    attach_candidates.append((ov_start - s_ex, p, True))
+                if ov_end <= s_ent:
+                    attach_candidates.append((s_ent - ov_end, p, False))
+            if not attach_candidates:
+                # Overflow session's time overlaps the span of our own slots in a
+                # way with no clean chronological attachment point — skip rather
+                # than fabricate an inverted or overlapping time.
+                continue
+
+            attach_candidates.sort(key=lambda c: c[0])
+            _, best_p, extend_forward = attach_candidates[0]
+            s_ent, s_ex = occupied[best_p]
+            new_ent, new_ex = (s_ent, s_ex + ov_dur) if extend_forward else (s_ent - ov_dur, s_ex)
+            write_slot(best_p, float_to_time_str(new_ent), float_to_time_str(new_ex), self_filled_source[best_p])
 
         xls_intervals = list(occupied.values())
 
-        # Overflow: more real work intervals than the sheet's fixed 3 entry/exit
-        # slots can show (e.g. several short fragmented home sessions, or a home +
-        # backfilled-office day that's already full). We never fabricate or
-        # stretch a displayed time to absorb this — doing so would misrepresent
-        # when the person actually worked. Instead its duration is folded straight
-        # into the day's total/OT math below, so pay and overtime stay accurate
-        # even though the extra session isn't itemised.
-        overflow_logs = candidates[placed_count:]
-        overflow_total = sum(
-            time_str_to_float(log["end"]) - time_str_to_float(log["start"])
-            for log in overflow_logs
-        )
-        if overflow_logs:
-            kinds = ", ".join(sorted({log["_source"] for log in overflow_logs}))
-            print(f"Note: {date_str} has {len(overflow_logs)} extra session(s) ({kinds}) beyond the "
-                  f"sheet's 3 entry/exit slots; their time is added to the day's total but not itemised.")
-
         # Calculate daily totals
-        net_total = sum(ex - ent for ent, ex in xls_intervals) + overflow_total
+        net_total = sum(ex - ent for ent, ex in xls_intervals)
         
         # Update weekday count
         if not is_off_day(day_name):
