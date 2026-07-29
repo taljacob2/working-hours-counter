@@ -57,7 +57,7 @@
     const file = e.target.files?.[0]
     if (!file) return
     parsingHeader = true
-    if (!isPyodideReady()) showToast('מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...', 'info')
+    if (!isPyodideReady()) showToast('Preparing the processing engine (one-time, may take a few seconds)...', 'info')
     try {
       // Parsed entirely client-side via Pyodide — no server involved, so
       // this works the same on GitHub Pages as locally.
@@ -74,10 +74,10 @@
       if (iso) employmentStartDateLocal = iso
 
       await saveSettings()
-      showToast('הפרטים נטענו ונשמרו בהצלחה ✓', 'success')
+      showToast('Details loaded and saved successfully ✓', 'success')
     } catch (err) {
       console.error(err)
-      showToast('טעינת הפרטים נכשלה: ' + err.message, 'error')
+      showToast('Failed to load details: ' + err.message, 'error')
     } finally {
       parsingHeader = false
       if (headerFileInput) headerFileInput.value = ''
@@ -846,44 +846,44 @@
     <ExcelMergeButton />
 
     <div class="card">
-    <p class="section-title">פרטי עובד וחברה (לדוח שנוצר מאפס)</p>
-    <p class="info-text">שדות אלו נדרשים רק אם תרצה ליצור דוח שעות חדש מאפס, בלי להעלות את קובץ ה-XLS הרשמי. ניתן למלא אותם ידנית, או לייבא אותם אוטומטית מקובץ חברה קיים.</p>
+    <p class="section-title">Employee &amp; Company Details (for a report generated from scratch)</p>
+    <p class="info-text">These fields are only needed if you want to generate a new hours report from scratch, without uploading the official XLS file. You can fill them in manually, or import them automatically from an existing company file.</p>
 
     <button type="button" class="btn btn-secondary" style="width:100%; margin-top:0.5rem" on:click={() => headerFileInput.click()} disabled={parsingHeader}>
-      {parsingHeader ? '⏳ מייבא ושומר...' : '⬆ ייבוא פרטים מקובץ חברה (Import)'}
+      {parsingHeader ? '⏳ Importing and saving...' : '⬆ Import details from company file (Import)'}
     </button>
     <p class="info-text" style="margin-top: 0.35rem; font-size: 0.78rem;">
-      הפרטים ייקראו מהכותרת של הקובץ ויישמרו מיד ב-Supabase, בדיוק כמו לחיצה על "שמור הגדרות".
+      The details will be read from the file's header and saved immediately to Supabase, just like clicking "Save settings".
     </p>
     <input type="file" accept=".xls" bind:this={headerFileInput} on:change={handleHeaderFileSelect} style="display:none" />
 
     <div style="margin-top: 0.75rem">
-      <label>שם חברה</label>
-      <input type="text" bind:value={companyNameLocal} placeholder="לדוגמה: אי אנד איי מערכות תו" style="width:100%; margin-top:0.25rem" />
+      <label>Company name</label>
+      <input type="text" bind:value={companyNameLocal} placeholder="e.g. Acme Systems Ltd" style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>שם עובד</label>
-      <input type="text" bind:value={employeeNameLocal} placeholder="שם מלא" style="width:100%; margin-top:0.25rem" />
+      <label>Employee name</label>
+      <input type="text" bind:value={employeeNameLocal} placeholder="Full name" style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>קוד עובד</label>
+      <label>Employee code</label>
       <input type="text" bind:value={employeeCodeLocal} style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>מספר כרטיס</label>
+      <label>Card number</label>
       <input type="text" bind:value={cardNumberLocal} style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>מס. בתוכנת שכר</label>
+      <label>Payroll system no.</label>
       <input type="text" bind:value={payrollNumberLocal} style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>תאריך תחילת עבודה</label>
+      <label>Employment start date</label>
       <input type="date" bind:value={employmentStartDateLocal} style="width:100%; margin-top:0.25rem" />
     </div>
     <div style="margin-top: 0.75rem">
-      <label>הסכם עבודה</label>
-      <input type="text" bind:value={workAgreementTextLocal} placeholder="לדוגמה: הסכם נוספות 9" style="width:100%; margin-top:0.25rem" />
+      <label>Work agreement</label>
+      <input type="text" bind:value={workAgreementTextLocal} placeholder="e.g. Overtime Agreement 9" style="width:100%; margin-top:0.25rem" />
     </div>
   </div>
 

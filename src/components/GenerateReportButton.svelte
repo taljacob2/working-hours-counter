@@ -18,7 +18,7 @@
   $: canGenerate = companyName.trim() !== '' && employeeName.trim() !== ''
 
   function getMonthName(date) {
-    return date.toLocaleString('he-IL', { month: 'long', year: 'numeric' })
+    return date.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
 
   // 'YYYY-MM-DD' -> 'DD/MM/YY', matching the vendor template's date format
@@ -34,8 +34,8 @@
     loading.set(true)
     showToast(
       isPyodideReady()
-        ? 'יוצר דוח שעות...'
-        : 'מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...',
+        ? 'Generating hours report...'
+        : 'Preparing the processing engine (one-time, may take a few seconds)...',
       'info'
     )
 
@@ -66,14 +66,14 @@
       const downloadUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = downloadUrl
-      a.download = `${employeeName || 'דוח'}_${targetYear}${String(targetMonth).padStart(2, '0')}_נוצר.xls`
+      a.download = `${employeeName || 'report'}_${targetYear}${String(targetMonth).padStart(2, '0')}_generated.xls`
       a.click()
       URL.revokeObjectURL(downloadUrl)
 
-      showToast('הדוח נוצר בהצלחה!', 'success')
+      showToast('Report generated successfully!', 'success')
     } catch (err) {
       console.error(err)
-      showToast('יצירת הדוח נכשלה: ' + err.message, 'error')
+      showToast('Report generation failed: ' + err.message, 'error')
     } finally {
       loading.set(false)
     }
@@ -84,17 +84,17 @@
   <div class="header-row">
     <div class="title-group">
       <span class="icon">🆕</span>
-      <h3>יצירת דוח שעות מאפס</h3>
+      <h3>Generate Hours Report From Scratch</h3>
     </div>
-    <span class="pill pill-home tabnum">חודש נבחר: {getMonthName($calCursor)}</span>
+    <span class="pill pill-home tabnum">Selected month: {getMonthName($calCursor)}</span>
   </div>
 
   <p class="description">
-    צור דוח שעות בפורמט החברה בלי להעלות קובץ .xls רשמי — שימושי אם עדיין אין ברשותך את הקובץ, או אם פשוט תרצה לדלג על ההעלאה. הדוח ייבנה מהנתונים שרשמת באפליקציה ומהפרטים שמולאו למעלה.
+    Generate an hours report in the company's format without uploading the official .xls file — useful if you don't have the file yet, or just want to skip the upload. The report will be built from the data you logged in the app and the details filled in above.
   </p>
 
   {#if !canGenerate}
-    <p class="warning-text">⚠ יש למלא שם חברה ושם עובד למעלה כדי ליצור דוח.</p>
+    <p class="warning-text">⚠ Fill in company name and employee name above to generate a report.</p>
   {/if}
 
   <button
@@ -104,14 +104,14 @@
     disabled={!canGenerate || $loading}
     on:click={handleGenerate}
   >
-    🆕 צור דוח שעות
+    🆕 Generate Hours Report
   </button>
 </div>
 
 <style>
   .generate-report-card {
     border-top: 4px solid var(--color-home);
-    direction: rtl;
+    direction: ltr;
   }
 
   .header-row {

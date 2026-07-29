@@ -32,9 +32,8 @@
     await sb.from('work_settings').upsert([{ key: 'fillMissingOfficeHours', value: String(checked) }])
   }
   
-  // Get month name in Hebrew/English
   function getMonthName(date) {
-    return date.toLocaleString('he-IL', { month: 'long', year: 'numeric' })
+    return date.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
 
   async function handleFileSelect(e) {
@@ -58,7 +57,7 @@
     const file = e.dataTransfer?.files?.[0]
     if (file) {
       if (!file.name.toLowerCase().endsWith('.xls')) {
-        showToast('נא להעלות קובץ XLS בלבד', 'error')
+        showToast('Please upload an XLS file only', 'error')
         return
       }
       await processFile(file)
@@ -69,8 +68,8 @@
     loading.set(true)
     showToast(
       isPyodideReady()
-        ? 'קורא את קובץ האקסל ומכין את הנתונים...'
-        : 'מכין את מנוע העיבוד (חד פעמי, עשוי לקחת כמה שניות)...',
+        ? 'Reading the Excel file and preparing the data...'
+        : 'Preparing the processing engine (one-time, may take a few seconds)...',
       'info'
     )
 
@@ -94,16 +93,15 @@
       const a = document.createElement('a')
       a.href = downloadUrl
 
-      // Formulate clean name e.g. merged_july_2026.xls
       const origName = file.name.replace(/\.xls$/i, '')
-      a.download = `${origName}_מעודכן.xls`
+      a.download = `${origName}_updated.xls`
       a.click()
       URL.revokeObjectURL(downloadUrl)
 
-      showToast('הקובץ מוזג ועודכן בהצלחה!', 'success')
+      showToast('File merged and updated successfully!', 'success')
     } catch (err) {
       console.error(err)
-      showToast('מיזוג נכשל: ' + err.message, 'error')
+      showToast('Merge failed: ' + err.message, 'error')
     } finally {
       loading.set(false)
       if (fileInput) fileInput.value = ''
@@ -115,13 +113,13 @@
   <div class="header-row">
     <div class="title-group">
       <span class="icon">📊</span>
-      <h3>עדכון ומיזוג קובץ אקסל רשמי</h3>
+      <h3>Update &amp; Merge Official Excel File</h3>
     </div>
-    <span class="pill pill-home tabnum">חודש נבחר: {getMonthName($calCursor)}</span>
+    <span class="pill pill-home tabnum">Selected month: {getMonthName($calCursor)}</span>
   </div>
-  
+
   <p class="description">
-    העלה את דוח השעות הרשמי שקיבלת מהחברה (בפורמט <code>.xls</code>). המערכת תשלב לתוכו אוטומטית את שעות העבודה מהבית המדווחות באפליקציה ותחשב מחדש את כל התקנים והשעות הנוספות מבלי לפגוע בעיצוב ובמבנה הדוח המקורי.
+    Upload the official hours report you received from the company (in <code>.xls</code> format). The system will automatically merge in the work-from-home hours logged in the app and recalculate all norms and overtime, without affecting the original report's styling or structure.
   </p>
   
   <!-- Drag & Drop Dropzone -->
@@ -136,8 +134,8 @@
   >
     <div class="dropzone-content">
       <span class="upload-icon">📥</span>
-      <span class="primary-text">לחץ לבחירת קובץ או גרור לכאן קובץ אקסל (.xls)</span>
-      <span class="secondary-text">תומך בדוחות של JBClock</span>
+      <span class="primary-text">Click to choose a file or drag an Excel file here (.xls)</span>
+      <span class="secondary-text">Supports JBClock reports</span>
     </div>
   </button>
   
@@ -151,7 +149,7 @@
   
   <div class="info-alert">
     <span class="alert-icon">💡</span>
-    <p>שעות העבודה מהבית ימוזגו לתוך עמודות הכניסה/יציאה המשניות (כניסה 2 ויציאה 2) בהתאמה לכל יום עבודה. בנוסף, סימון "חופש" יתעדכן אוטומטית בהתאם לימי החופש שסימנת ידנית באפליקציה (הוספה או מחיקה של הסימון בקובץ שהתקבל).</p>
+    <p>Work-from-home hours will be merged into the secondary check-in/check-out columns (check-in 2 and check-out 2) for each work day. In addition, the "vacation" marking will update automatically based on the vacation days you marked manually in the app (adding or removing the marking in the received file).</p>
   </div>
 
   <label class="color-toggle-row">
@@ -160,7 +158,7 @@
       checked={colorHomeHoursLocal}
       on:change={e => toggleColorHomeHours(e.target.checked)}
     />
-    <span>צבע את שעות הבית שהוספנו בגוון ייחודי (בנוסף לצבעי החברה לחריגות/חופש)</span>
+    <span>Color the home hours we added in a distinct shade (in addition to the company's colors for exceptions/vacation)</span>
   </label>
 
   <label class="color-toggle-row">
@@ -169,14 +167,14 @@
       checked={fillMissingOfficeLocal}
       on:change={e => toggleFillMissingOffice(e.target.checked)}
     />
-    <span>השלם שעות משרד שהאפליקציה תיעדה אך טרם פורטו בקובץ החברה (מסומן בכתום עבור משאבי אנוש)</span>
+    <span>Backfill office hours the app tracked but the company file hasn't detailed yet (highlighted in purple for HR)</span>
   </label>
 </div>
 
 <style>
   .xls-merge-card {
     border-top: 4px solid var(--color-home);
-    direction: rtl;
+    direction: ltr;
   }
   
   .header-row {

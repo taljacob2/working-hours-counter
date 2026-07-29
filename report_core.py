@@ -28,7 +28,8 @@ COLOUR_POSITIVE = 17  # Dark Green  — surplus / overtime
 COLOUR_NEGATIVE = 10  # Red         — deficit
 COLOUR_VACATION = 12  # Blue        — vacation (חופש)
 COLOUR_HOME     = 49  # Teal/Cyan   — optional colour for inserted home intervals
-COLOUR_OFFICE_GAP = 46  # Orange     — office hours backfilled from the app, not yet
+COLOUR_OFFICE_GAP = 46  # Purple (renders per the uploaded workbook's own custom
+                        # palette) — office hours backfilled from the app, not yet
                         # confirmed by the company's own attendance system
 
 HEADER_ROW = 5
