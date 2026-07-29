@@ -2,6 +2,7 @@
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours, requiredHours } from '../stores/appStore.js'
   import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
   import { generateXls, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+  import { saveFile } from '../lib/exportUtils.js'
 
   warmUpPyodide()
 
@@ -63,17 +64,18 @@
       // Generated entirely client-side via Pyodide — no server involved, so
       // this works the same on GitHub Pages as locally.
       const blob = await generateXls(config, allIntervals)
-      const downloadUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = downloadUrl
-      a.download = `${employeeName || 'report'}_${targetYear}${String(targetMonth).padStart(2, '0')}_generated.xls`
-      a.click()
-      URL.revokeObjectURL(downloadUrl)
+
+      // On Android this shows a native "Save to…" picker so the user knows
+      // exactly where it went; on web it's a normal browser download.
+      const filename = `${employeeName || 'report'}_${targetYear}${String(targetMonth).padStart(2, '0')}_generated.xls`
+      await saveFile(blob, filename, 'application/vnd.ms-excel')
 
       showToast('Report generated successfully!', 'success')
     } catch (err) {
-      console.error(err)
-      showToast('Report generation failed: ' + err.message, 'error')
+      if (err?.message !== 'cancelled') {
+        console.error(err)
+        showToast('Report generation failed: ' + err.message, 'error')
+      }
     } finally {
       loading.set(false)
     }

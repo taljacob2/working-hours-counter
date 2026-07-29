@@ -43,9 +43,13 @@ public class FileSaverPlugin extends Plugin {
         }
         Uri uri = data.getData();
         String content = call.getString("content", "");
+        boolean isBase64 = call.getBoolean("isBase64", false);
         try {
+            byte[] bytes = isBase64
+                ? android.util.Base64.decode(content, android.util.Base64.DEFAULT)
+                : content.getBytes("UTF-8");
             OutputStream out = getContext().getContentResolver().openOutputStream(uri);
-            out.write(content.getBytes("UTF-8"));
+            out.write(bytes);
             out.close();
             call.resolve();
         } catch (Exception e) {

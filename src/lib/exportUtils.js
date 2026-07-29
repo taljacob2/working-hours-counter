@@ -8,13 +8,31 @@ const HE = {
 
 const FileSaver = Capacitor.isNativePlatform() ? registerPlugin('FileSaver') : null
 
-// On Android shows a native "Save to…" folder picker via ACTION_CREATE_DOCUMENT.
-// On web falls back to the browser download trick.
+// Chunked to avoid blowing the call stack via String.fromCharCode.apply on large files.
+function bytesToBase64(bytes) {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+// On Android shows a native "Save to…" folder picker via ACTION_CREATE_DOCUMENT, so
+// the user always knows where the file went. On web falls back to the browser
+// download trick. `content` may be a string (text files) or a Blob/Uint8Array
+// (binary files, e.g. .xls) — binary content is base64-encoded for the native bridge.
 export async function saveFile(content, filename, mimeType) {
+  const isBinary = content instanceof Blob || content instanceof Uint8Array
   if (FileSaver) {
-    await FileSaver.saveFile({ content, filename, mimeType })
+    if (isBinary) {
+      const bytes = content instanceof Blob ? new Uint8Array(await content.arrayBuffer()) : content
+      await FileSaver.saveFile({ content: bytesToBase64(bytes), filename, mimeType, isBase64: true })
+    } else {
+      await FileSaver.saveFile({ content, filename, mimeType })
+    }
   } else {
-    const blob = new Blob([content], { type: mimeType })
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

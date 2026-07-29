@@ -2,6 +2,7 @@
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours } from '../stores/appStore.js'
   import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
   import { mergeXls, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+  import { saveFile } from '../lib/exportUtils.js'
 
   warmUpPyodide()
 
@@ -71,20 +72,18 @@
       const xlsBytes = new Uint8Array(await file.arrayBuffer())
       const blob = await mergeXls(xlsBytes, allIntervals, colorHomeHoursLocal, $dayOverrides, fillMissingOfficeLocal)
 
-      // 4. Trigger download of the merged file
-      const downloadUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = downloadUrl
-
+      // 4. Save the merged file — on Android this shows a native "Save to…"
+      // picker so the user knows exactly where it went; on web it's a normal
+      // browser download.
       const origName = file.name.replace(/\.xls$/i, '')
-      a.download = `${origName}_updated.xls`
-      a.click()
-      URL.revokeObjectURL(downloadUrl)
+      await saveFile(blob, `${origName}_updated.xls`, 'application/vnd.ms-excel')
 
       showToast('File merged and updated successfully!', 'success')
     } catch (err) {
-      console.error(err)
-      showToast('Merge failed: ' + err.message, 'error')
+      if (err?.message !== 'cancelled') {
+        console.error(err)
+        showToast('Merge failed: ' + err.message, 'error')
+      }
     } finally {
       loading.set(false)
       if (fileInput) fileInput.value = ''
