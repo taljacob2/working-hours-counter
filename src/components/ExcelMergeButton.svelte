@@ -1,6 +1,5 @@
 <script>
   import { logs, calCursor, showToast, loading, excelColorHomeHours, dayOverrides, fillMissingOfficeHours } from '../stores/appStore.js'
-  import { getSupabase } from '../lib/supabase.js'
   import { monthLogsAndIntervals } from '../lib/reportIntervals.js'
   import { mergeXls, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
 
@@ -13,25 +12,9 @@
   let colorHomeHoursLocal = false
   excelColorHomeHours.subscribe(v => colorHomeHoursLocal = v)
 
-  async function toggleColorHomeHours(checked) {
-    colorHomeHoursLocal = checked
-    excelColorHomeHours.set(checked)
-    localStorage.setItem('whl_excel_color_home', String(checked))
-    const sb = getSupabase()
-    await sb.from('work_settings').upsert([{ key: 'excelColorHomeHours', value: String(checked) }])
-  }
-
   let fillMissingOfficeLocal = true
   fillMissingOfficeHours.subscribe(v => fillMissingOfficeLocal = v)
 
-  async function toggleFillMissingOffice(checked) {
-    fillMissingOfficeLocal = checked
-    fillMissingOfficeHours.set(checked)
-    localStorage.setItem('whl_fill_missing_office', String(checked))
-    const sb = getSupabase()
-    await sb.from('work_settings').upsert([{ key: 'fillMissingOfficeHours', value: String(checked) }])
-  }
-  
   function getMonthName(date) {
     return date.toLocaleString('en-US', { month: 'long', year: 'numeric' })
   }
@@ -151,24 +134,6 @@
     <span class="alert-icon">💡</span>
     <p>Work-from-home hours will be merged into the secondary check-in/check-out columns (check-in 2 and check-out 2) for each work day. In addition, the "vacation" marking will update automatically based on the vacation days you marked manually in the app (adding or removing the marking in the received file).</p>
   </div>
-
-  <label class="color-toggle-row">
-    <input
-      type="checkbox"
-      checked={colorHomeHoursLocal}
-      on:change={e => toggleColorHomeHours(e.target.checked)}
-    />
-    <span>Color the home hours we added in a distinct shade (in addition to the company's colors for exceptions/vacation)</span>
-  </label>
-
-  <label class="color-toggle-row">
-    <input
-      type="checkbox"
-      checked={fillMissingOfficeLocal}
-      on:change={e => toggleFillMissingOffice(e.target.checked)}
-    />
-    <span>Backfill office hours the app tracked but the company file hasn't detailed yet (highlighted in purple for HR)</span>
-  </label>
 </div>
 
 <style>
@@ -267,21 +232,5 @@
     font-size: 0.8125rem;
     color: var(--color-text-muted);
     line-height: 1.4;
-  }
-
-  .color-toggle-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-top: var(--space-3);
-    font-size: 0.8125rem;
-    color: var(--color-text);
-    font-weight: normal;
-    cursor: pointer;
-  }
-
-  .color-toggle-row input {
-    cursor: pointer;
-    flex-shrink: 0;
   }
 </style>

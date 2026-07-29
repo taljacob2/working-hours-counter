@@ -6,6 +6,7 @@
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
   import ExcelMergeButton from '../components/ExcelMergeButton.svelte'
+  import ExcelReportOptions from '../components/ExcelReportOptions.svelte'
   import GenerateReportButton from '../components/GenerateReportButton.svelte'
   import CollapsibleSection from '../components/CollapsibleSection.svelte'
   import { parseXlsHeader, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
@@ -843,6 +844,8 @@
   </CollapsibleSection>
 
   <CollapsibleSection title="Excel Reports" icon="📊">
+    <ExcelReportOptions />
+
     <ExcelMergeButton />
 
     <div class="card">
