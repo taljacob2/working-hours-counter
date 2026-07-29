@@ -566,7 +566,7 @@
     💾 Save settings
   </button>
 
-  <CollapsibleSection title="Work Hours & Preferences" icon="🕐" open={true}>
+  <CollapsibleSection title="Work Hours & Preferences" icon="🕐">
     <div style="margin-bottom: 1.5rem">
       <label>Required Daily Hours</label>
       <div class="hours-row" style="margin-top: 0.25rem">
