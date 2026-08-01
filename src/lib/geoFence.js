@@ -37,7 +37,6 @@ export class GeoFenceWatcher {
   #pendingCrossedAt = null // wall-clock time when the current pending transition started
   #watchId = null         // web watchPosition ID
   #nativePlugin = null    // @capgo/background-geolocation plugin ref
-  #nativeWatcherId = null // watcher ID returned by addWatcher, needed for removeWatcher
   #hysteresisTimer = null
   #enterThresholdMs       // ms inside required before onEnter fires
   #leaveThresholdMs       // ms outside required before onLeave fires
@@ -63,10 +62,7 @@ export class GeoFenceWatcher {
   stop() {
     if (this.#hysteresisTimer) { clearTimeout(this.#hysteresisTimer); this.#hysteresisTimer = null; this.#pendingInside = null; this.#pendingCrossedAt = null }
     if (this.#nativePlugin) {
-      if (this.#nativeWatcherId !== null) {
-        this.#nativePlugin.removeWatcher?.({ id: this.#nativeWatcherId })
-        this.#nativeWatcherId = null
-      }
+      this.#nativePlugin.stop?.().catch(() => {})
       this.#nativePlugin = null
     }
     if (this.#watchId !== null && typeof navigator !== 'undefined') {
@@ -89,13 +85,24 @@ export class GeoFenceWatcher {
       const { BackgroundGeolocation } = await import('@capgo/background-geolocation')
       this.#nativePlugin = BackgroundGeolocation
 
-      this.#nativeWatcherId = await BackgroundGeolocation.addWatcher(
+      // start() runs a real Android foreground service (with a persistent
+      // notification), which keeps delivering position updates while
+      // backgrounded or after the app is swiped away from recents — unlike a
+      // plain JS watcher, which stops the moment the WebView is suspended.
+      //
+      // distanceFilter scales with the configured radius: it must stay
+      // smaller than the geofence itself, or the plugin can silently skip
+      // reporting a fix while the device crosses the boundary (e.g. a fixed
+      // 15m filter on a 10m-radius geofence can mean walking all the way out
+      // never produces a single new position update).
+      const distanceFilter = Math.min(15, Math.max(3, Math.round((this.#location?.radiusMeters ?? 200) / 4)))
+      await BackgroundGeolocation.start(
         {
           backgroundMessage: 'Working Hours is tracking your office location.',
           backgroundTitle: 'Office Auto-Track',
           requestPermissions: true,
           stale: false,
-          distanceFilter: 15,  // only fire updates every 15m movement
+          distanceFilter,
         },
         (position, error) => {
           if (error || !position) return

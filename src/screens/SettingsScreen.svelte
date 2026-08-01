@@ -387,13 +387,15 @@
   autoTrackEnabled.subscribe(v => autoTrackLocal = v)
 
   let officeRadiusLocal = 200
-  let resumeThresholdLocal = 0.25
-  let pauseThresholdLocal = 0.25
+  // Stored as hours (resumeThresholdHours/pauseThresholdHours) for backward
+  // compatibility with existing saved locations — only the UI works in minutes.
+  let resumeThresholdMinLocal = 15
+  let pauseThresholdMinLocal = 15
   $: activeLocLocal = officeLocsLocal.find(l => l.id === activeOfficeIdLocal) ?? null
   $: if (activeLocLocal) {
     officeRadiusLocal = activeLocLocal.radiusMeters
-    resumeThresholdLocal = activeLocLocal.resumeThresholdHours ?? 0.25
-    pauseThresholdLocal  = activeLocLocal.pauseThresholdHours  ?? 0.25
+    resumeThresholdMinLocal = Math.round((activeLocLocal.resumeThresholdHours ?? 0.25) * 60)
+    pauseThresholdMinLocal  = Math.round((activeLocLocal.pauseThresholdHours  ?? 0.25) * 60)
   }
 
   let newLocName = ''
@@ -432,7 +434,7 @@
   async function updateThresholds() {
     if (!activeLocLocal) return
     const updated = officeLocsLocal.map(l => l.id === activeOfficeIdLocal
-      ? { ...l, resumeThresholdHours: resumeThresholdLocal, pauseThresholdHours: pauseThresholdLocal }
+      ? { ...l, resumeThresholdHours: resumeThresholdMinLocal / 60, pauseThresholdHours: pauseThresholdMinLocal / 60 }
       : l)
     await saveLocations(updated, activeOfficeIdLocal, false)
   }
@@ -933,33 +935,36 @@
           <div style="margin-top: 0.75rem;">
             <label style="font-size: 0.8rem;">Detection radius: <strong>{officeRadiusLocal}m</strong></label>
             <div class="hours-row" style="margin-top: 0.25rem;">
-              <input type="range" min="50" max="2000" step="50"
+              <input type="range" min="10" max="2000" step="1"
                 bind:value={officeRadiusLocal} on:change={updateActiveRadius} style="flex:1" />
-              <input type="number" min="50" max="2000" step="50"
+              <input type="number" min="10" max="2000" step="1"
                 bind:value={officeRadiusLocal} on:change={updateActiveRadius} style="width:80px" />
               <span class="hours-label">m</span>
             </div>
+            <p class="info-text" style="margin-top: 0.35rem; font-size: 0.72rem;">
+              Phone GPS is rarely accurate below ~10m (much worse indoors), so smaller radii tend to trigger falsely from GPS noise alone rather than actual movement.
+            </p>
           </div>
 
           <div style="margin-top: 0.75rem;">
-            <label style="font-size: 0.8rem;">Resume after being inside for: <strong>{resumeThresholdLocal}h</strong></label>
+            <label style="font-size: 0.8rem;">Resume after being inside for: <strong>{resumeThresholdMinLocal} min</strong></label>
             <div class="hours-row" style="margin-top: 0.25rem;">
-              <input type="range" min="0.25" max="8" step="0.25"
-                bind:value={resumeThresholdLocal} on:change={updateThresholds} style="flex:1" />
-              <input type="number" min="0.25" max="8" step="0.25"
-                bind:value={resumeThresholdLocal} on:change={updateThresholds} style="width:80px" />
-              <span class="hours-label">h</span>
+              <input type="range" min="1" max="480" step="1"
+                bind:value={resumeThresholdMinLocal} on:change={updateThresholds} style="flex:1" />
+              <input type="number" min="1" max="480" step="1"
+                bind:value={resumeThresholdMinLocal} on:change={updateThresholds} style="width:80px" />
+              <span class="hours-label">min</span>
             </div>
           </div>
 
           <div style="margin-top: 0.75rem;">
-            <label style="font-size: 0.8rem;">Pause after being outside for: <strong>{pauseThresholdLocal}h</strong></label>
+            <label style="font-size: 0.8rem;">Pause after being outside for: <strong>{pauseThresholdMinLocal} min</strong></label>
             <div class="hours-row" style="margin-top: 0.25rem;">
-              <input type="range" min="0.25" max="8" step="0.25"
-                bind:value={pauseThresholdLocal} on:change={updateThresholds} style="flex:1" />
-              <input type="number" min="0.25" max="8" step="0.25"
-                bind:value={pauseThresholdLocal} on:change={updateThresholds} style="width:80px" />
-              <span class="hours-label">h</span>
+              <input type="range" min="1" max="480" step="1"
+                bind:value={pauseThresholdMinLocal} on:change={updateThresholds} style="flex:1" />
+              <input type="number" min="1" max="480" step="1"
+                bind:value={pauseThresholdMinLocal} on:change={updateThresholds} style="width:80px" />
+              <span class="hours-label">min</span>
             </div>
           </div>
 
