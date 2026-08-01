@@ -19,11 +19,19 @@ function isNative() {
   return typeof window !== 'undefined' && !!(window.Capacitor?.isNativePlatform?.())
 }
 
+// Capacitor plugin objects are Proxies whose `get` trap returns a callable
+// wrapper for ANY property, including `then` — so returning one directly from
+// an async function (or otherwise making it a promise's resolution value)
+// makes JS treat it as a thenable and call `.then()` on it, which Android
+// forwards to native as a real (nonexistent) method call and throws
+// "X.then() is not implemented". Wrap it in a plain object so it can safely
+// pass through `await`/Promise resolution, then unwrap with a plain property
+// access (not a promise step) at each call site.
 async function getPlugin() {
   if (!isNative()) return null
   try {
     const { LocalNotifications } = await import('@capacitor/local-notifications')
-    return LocalNotifications
+    return { plugin: LocalNotifications }
   } catch {
     return null
   }
@@ -31,7 +39,7 @@ async function getPlugin() {
 
 /** Ask Android for notification permission. Returns true if granted. */
 export async function requestNotificationPermission() {
-  const plugin = await getPlugin()
+  const { plugin } = (await getPlugin()) || {}
   if (!plugin) return true  // non-native: allow toggling settings; scheduling is a no-op anyway
   try {
     const { display } = await plugin.requestPermissions()
@@ -50,7 +58,7 @@ export async function rescheduleAll({
   eveningEnabled, eveningTime,
   offDaysArr, dayOverridesObj,
 }) {
-  const plugin = await getPlugin()
+  const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
 
   // Ensure the notification channel exists on Android (idempotent)
@@ -125,7 +133,7 @@ export async function rescheduleAll({
  * Call as soon as the user creates any log for today.
  */
 export async function cancelTodayReminders() {
-  const plugin = await getPlugin()
+  const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
   await plugin.cancel({
     notifications: [{ id: ID_MORNING_BASE }, { id: ID_EVENING_BASE }],
@@ -139,7 +147,7 @@ export async function cancelTodayReminders() {
  * @param {number} requiredHoursMs  — ms until target (e.g. 9 * 3_600_000)
  */
 export async function scheduleTargetReached(resumeTime, requiredHoursMs) {
-  const plugin = await getPlugin()
+  const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
   await plugin.cancel({ notifications: [{ id: ID_TARGET }] }).catch(() => {})
   const at = new Date(resumeTime.getTime() + requiredHoursMs)
@@ -158,7 +166,7 @@ export async function scheduleTargetReached(resumeTime, requiredHoursMs) {
 
 /** Cancel the pending "daily target reached" notification. */
 export async function cancelTargetReached() {
-  const plugin = await getPlugin()
+  const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
   await plugin.cancel({ notifications: [{ id: ID_TARGET }] }).catch(() => {})
 }

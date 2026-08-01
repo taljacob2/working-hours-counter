@@ -4,7 +4,7 @@
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
-  import { rescheduleAll, cancelTodayReminders, scheduleTargetReached, cancelTargetReached } from './lib/notifications.js'
+  import { rescheduleAll, cancelTodayReminders, scheduleTargetReached, cancelTargetReached, requestNotificationPermission } from './lib/notifications.js'
 
   import Spinner     from './components/Spinner.svelte'
   import Toast       from './components/Toast.svelte'
@@ -74,8 +74,16 @@
   // ── Notifications ────────────────────────────────────────────
   let notifReady = false
 
-  function scheduleNotifications() {
+  async function scheduleNotifications() {
     notifReady = true
+    // Settings can say "on" (e.g. synced from another device) without this
+    // device ever having actually granted the OS permission — verify/request
+    // it here too, not just from the Settings toggle, so a silent permission
+    // gap doesn't just fail every scheduled notification with no feedback.
+    if ($notifMorningEnabled || $notifEveningEnabled || $notifTargetEnabled) {
+      const granted = await requestNotificationPermission()
+      if (!granted) showToast('Notification permission not granted — reminders won\'t fire. Enable it in system settings.', 'error')
+    }
     rescheduleAll({
       morningEnabled: $notifMorningEnabled,
       morningTime:    $notifMorningTime,
