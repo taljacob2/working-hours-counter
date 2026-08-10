@@ -21,6 +21,20 @@
     return signIn()
   }
 
+  // OAuth is a full-page redirect — Supabase sends the browser to the
+  // provider, then back to redirectTo with the session already in the URL.
+  // App.svelte's onMount already calls getSession()/loadAll() on load, so
+  // no extra handling is needed here once the redirect lands back on the app.
+  async function signInWithProvider(provider) {
+    error = ''
+    const sb = getSupabase()
+    const { error: err } = await sb.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.origin + import.meta.env.BASE_URL },
+    })
+    if (err) error = err.message
+  }
+
   async function signIn() {
     error = ''
     busy = true
@@ -120,6 +134,16 @@
       </button>
     </form>
 
+    <div class="oauth-divider"><span>or</span></div>
+    <div class="oauth-buttons">
+      <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('google')}>
+        Continue with Google
+      </button>
+      <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('github')}>
+        Continue with GitHub
+      </button>
+    </div>
+
     <p class="reconfigure-hint">
       {#if mode === 'signup'}
         Already have an account?
@@ -159,6 +183,14 @@
   .auth-subtitle { text-align: center; color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
   .form-error { color: var(--color-ot-neg); font-size: 0.875rem; margin-top: 0.5rem; }
   .form-info { color: var(--color-primary); font-size: 0.875rem; margin-top: 0.5rem; }
+  .oauth-divider {
+    display: flex; align-items: center; gap: 0.75rem;
+    margin: 1.25rem 0; color: var(--color-text-muted); font-size: 0.75rem;
+  }
+  .oauth-divider::before, .oauth-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--color-border);
+  }
+  .oauth-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
   .reconfigure-hint { text-align: center; font-size: 0.8rem; color: var(--color-text-muted); margin-top: 1.25rem; }
   .link-btn { background: none; border: none; color: var(--color-primary); cursor: pointer; font-size: 0.8rem; text-decoration: underline; }
   .spin {
