@@ -91,8 +91,11 @@ end $$;
 -- ============================================================
 
 -- 5. Explicit permissions (fixes "permission denied" errors)
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on table public.work_logs to anon, authenticated;
-grant select, insert, update, delete on table public.work_settings to anon, authenticated;
-grant select, insert, update, delete on table public.rebalance_history to anon, authenticated;
-grant select, insert, update, delete on table public.push_subscriptions to anon, authenticated;
+-- service_role is included too: scripts/send-notifications.mjs authenticates
+-- as service_role (no user session to act as authenticated with), and it
+-- does NOT get implicit table access just from bypassing RLS.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.work_logs to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.work_settings to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.rebalance_history to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.push_subscriptions to anon, authenticated, service_role;
