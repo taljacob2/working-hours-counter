@@ -4,7 +4,7 @@
 // configured.
 export const OAUTH_PROVIDERS = {
   google: false,
-  github: false,
+  github: true,
 }
 
 export const hasEnabledOAuthProvider = Object.values(OAUTH_PROVIDERS).some(Boolean)
