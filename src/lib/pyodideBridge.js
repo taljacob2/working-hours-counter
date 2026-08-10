@@ -5,18 +5,19 @@
 // real .xls, real xlrd auto-detects the uploaded file's actual styling,
 // exactly like the local Python CLI scripts do.
 //
-// Loaded from the public jsdelivr CDN (Pyodide's official distribution) so
-// there's no bundler-vs-WASM friction and the (few-MB) runtime is shared
-// across sites' browser caches. Keep PYODIDE_VERSION in sync with the
-// `pyodide` devDependency version in package.json.
+// The actual Pyodide runtime lives in src/workers/pyodideWorker.js, off the
+// main thread — its init (WASM instantiation, micropip install) is heavy
+// enough that running it inline used to freeze the whole page (couldn't
+// even open other Settings sections) while it loaded. This file is just the
+// main-thread message-passing wrapper; callers see the same async API as
+// before and don't know a worker is involved.
 
 import { writable } from 'svelte/store'
 
-const PYODIDE_VERSION = '314.0.3'
-const PYODIDE_CDN_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
-
-let pyodidePromise = null
+let worker = null
 let pyodideReady = false
+let nextRequestId = 1
+const pending = new Map()
 
 /** True once Pyodide has finished loading at least once in this session —
  * lets callers decide whether to show a "one-time setup" message. */
@@ -28,78 +29,84 @@ export function isPyodideReady() {
 // its own loading bar without touching the rest of the Settings screen.
 export const pyodideStatus = writable('idle')
 
-async function initPyodide() {
-  pyodideStatus.set('loading')
-  try {
-    const { loadPyodide } = await import(/* @vite-ignore */ `${PYODIDE_CDN_BASE}pyodide.mjs`)
-    const pyodide = await loadPyodide({ indexURL: PYODIDE_CDN_BASE })
+function ensureWorker() {
+  if (worker) return worker
 
-    await pyodide.loadPackage('micropip')
-    const micropip = pyodide.pyimport('micropip')
-    // Pinned to match requirements.txt — same versions the local CLI uses.
-    await micropip.install(['xlrd==2.0.2', 'xlwt==1.3.0', 'xlutils==2.0.0'])
+  worker = new Worker(new URL('../workers/pyodideWorker.js', import.meta.url), { type: 'module' })
 
-    const base = import.meta.env.BASE_URL
-    const [reportCoreSrc, webBridgeSrc] = await Promise.all([
-      fetch(`${base}py/report_core.py`).then(r => r.text()),
-      fetch(`${base}py/web_bridge.py`).then(r => r.text()),
-    ])
-    pyodide.FS.writeFile('/report_core.py', reportCoreSrc)
-    pyodide.FS.writeFile('/web_bridge.py', webBridgeSrc)
-    pyodide.runPython(`
-import sys
-if '/' not in sys.path:
-    sys.path.insert(0, '/')
-import web_bridge
-`)
-
-    pyodideReady = true
-    pyodideStatus.set('ready')
-    return pyodide
-  } catch (err) {
-    // Let a later call (e.g. an actual button click) retry from scratch
-    // instead of forever replaying the same cached rejection.
-    pyodidePromise = null
-    pyodideStatus.set('error')
-    throw err
+  worker.onmessage = e => {
+    const msg = e.data
+    if (msg.type === 'status') {
+      if (msg.status === 'ready') {
+        pyodideReady = true
+        pyodideStatus.set('ready')
+      } else if (msg.status === 'error') {
+        pyodideStatus.set('error')
+        failAllPending(new Error(msg.message || 'Failed to load the Excel engine'))
+        // Let a later call (e.g. an actual button click) retry from scratch
+        // instead of forever replaying the same broken worker.
+        worker.terminate()
+        worker = null
+      } else {
+        pyodideStatus.set(msg.status)
+      }
+      return
+    }
+    const p = pending.get(msg.id)
+    if (!p) return
+    pending.delete(msg.id)
+    if (msg.ok) p.resolve(msg.result)
+    else p.reject(new Error(msg.error))
   }
+
+  worker.onerror = err => {
+    pyodideStatus.set('error')
+    failAllPending(new Error(err.message || 'Excel engine worker crashed'))
+    worker?.terminate()
+    worker = null
+  }
+
+  return worker
 }
 
-function getPyodide() {
-  if (!pyodidePromise) pyodidePromise = initPyodide()
-  return pyodidePromise
+function failAllPending(err) {
+  for (const p of pending.values()) p.reject(err)
+  pending.clear()
+}
+
+function callWorker(action, args) {
+  const w = ensureWorker()
+  const id = nextRequestId++
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject })
+    w.postMessage({ id, action, args })
+  })
 }
 
 /** Optionally call ahead of time (e.g. as soon as the Excel card mounts) to
  * start the one-time download/init early, so the first real click feels
  * faster. Safe to call redundantly — errors surface on the real calls. */
 export function warmUpPyodide() {
-  getPyodide().catch(() => {})
+  ensureWorker()
 }
 
 export async function mergeXls(xlsBytes, logs, colorHomeHours, dayOverrides, fillMissingOffice) {
-  const pyodide = await getPyodide()
-  const webBridge = pyodide.pyimport('web_bridge')
-  const resultBytes = webBridge.run_merge(
+  const resultBytes = await callWorker('merge', [
     xlsBytes,
     JSON.stringify(logs),
     !!colorHomeHours,
     dayOverrides ? JSON.stringify(dayOverrides) : null,
     fillMissingOffice !== false,
-  )
-  return new Blob([resultBytes.toJs()], { type: 'application/vnd.ms-excel' })
+  ])
+  return new Blob([resultBytes], { type: 'application/vnd.ms-excel' })
 }
 
 export async function generateXls(config, logs) {
-  const pyodide = await getPyodide()
-  const webBridge = pyodide.pyimport('web_bridge')
-  const resultBytes = webBridge.run_generate(JSON.stringify(config), JSON.stringify(logs))
-  return new Blob([resultBytes.toJs()], { type: 'application/vnd.ms-excel' })
+  const resultBytes = await callWorker('generate', [JSON.stringify(config), JSON.stringify(logs)])
+  return new Blob([resultBytes], { type: 'application/vnd.ms-excel' })
 }
 
 export async function parseXlsHeader(xlsBytes) {
-  const pyodide = await getPyodide()
-  const webBridge = pyodide.pyimport('web_bridge')
-  const resultJson = webBridge.run_parse_header(xlsBytes)
+  const resultJson = await callWorker('parseHeader', [xlsBytes])
   return JSON.parse(resultJson)
 }
