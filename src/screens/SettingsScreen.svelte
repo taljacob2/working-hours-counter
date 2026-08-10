@@ -573,6 +573,40 @@
     showToast('Signed out', 'info')
   }
 
+  // Which sign-in methods (email, google, github) are attached to this
+  // account — lets someone who originally signed up with email/password
+  // also link Google/GitHub so either one gets them back to the same data.
+  let identities = []
+  onMount(async () => {
+    const sb = getSupabase()
+    const { data } = await sb.auth.getUserIdentities()
+    identities = data?.identities || []
+  })
+
+  function isLinked(provider) {
+    return identities.some(i => i.provider === provider)
+  }
+
+  async function linkProvider(provider) {
+    const sb = getSupabase()
+    const { error } = await sb.auth.linkIdentity({
+      provider,
+      options: { redirectTo: window.location.origin + import.meta.env.BASE_URL },
+    })
+    if (error) showToast(`Couldn't start linking ${provider}: ${error.message}`, 'error')
+    // On success this redirects away and back — identities re-load on next mount.
+  }
+
+  async function unlinkProvider(provider) {
+    const identity = identities.find(i => i.provider === provider)
+    if (!identity) return
+    const sb = getSupabase()
+    const { error } = await sb.auth.unlinkIdentity(identity)
+    if (error) { showToast(`Couldn't unlink ${provider}: ${error.message}`, 'error'); return }
+    identities = identities.filter(i => i.provider !== provider)
+    showToast(`${provider} unlinked`, 'info')
+  }
+
   function reconfigure() {
     if (import.meta.env.NEXT_PUBLIC_SUPABASE_URL) {
       showToast('Config is locked to Environment Variables', 'info')
@@ -1091,6 +1125,25 @@
 
   <CollapsibleSection title="Account &amp; Connection" icon="👤">
     <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
+
+    <p class="info-text" style="margin-top:1rem;">Linked sign-in methods</p>
+    <div class="linked-row">
+      <span>Google</span>
+      {#if isLinked('google')}
+        <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('google')}>Unlink</button>
+      {:else}
+        <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('google')}>Link</button>
+      {/if}
+    </div>
+    <div class="linked-row">
+      <span>GitHub</span>
+      {#if isLinked('github')}
+        <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('github')}>Unlink</button>
+      {:else}
+        <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('github')}>Link</button>
+      {/if}
+    </div>
+
     <div class="account-actions">
       <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
       <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
@@ -1112,6 +1165,8 @@
   .info-text { font-size: 0.875rem; color: var(--color-text-muted); line-height: 1.6; }
   .info-text code { font-size: 0.8rem; background: var(--color-surface-2); padding: 2px 6px; border-radius: 4px; }
   .account-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+  .linked-row { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border); }
+  .linked-row:last-of-type { border-bottom: none; }
   .office-loc-card { margin-top: 0.75rem; padding: 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1.5px solid var(--color-border); }
   .office-loc-active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
   .office-loc-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
