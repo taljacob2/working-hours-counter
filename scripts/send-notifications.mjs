@@ -59,7 +59,7 @@ async function main() {
   if (settingsErr) throw settingsErr
   const s = Object.fromEntries((settingsRows || []).map(r => [r.key, r.value]))
 
-  const deliverVia = s.notifDeliverVia || 'native'
+  const deliverVia = s.notifDeliverVia || 'both'
   if (deliverVia === 'native') { console.log('notifDeliverVia=native — nothing to do here'); return }
 
   const { data: subs, error: subsErr } = await sb.from('push_subscriptions').select('*')

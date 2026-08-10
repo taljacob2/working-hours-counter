@@ -39,7 +39,7 @@ export const notifTargetEnabled  = writable(false)
 // null = use requiredHours; number = custom hours override
 export const notifTargetHoursOverride = writable(null)
 // 'native' (OS-scheduled, Android only) | 'push' (Web Push, installed PWA) | 'both'
-export const notifDeliverVia = writable('native')
+export const notifDeliverVia = writable('both')
 
 // ── Excel merge ───────────────────────────────────────────────
 // When true, home-hours intervals are written in a distinct colour in merged XLS files.

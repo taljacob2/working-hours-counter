@@ -97,7 +97,7 @@
   notifTargetEnabled.subscribe(v => notifTargetEnabledLocal = v)
   let notifTargetHoursLocal = null
   notifTargetHoursOverride.subscribe(v => notifTargetHoursLocal = v)
-  let notifDeliverViaLocal = 'native'
+  let notifDeliverViaLocal = 'both'
   notifDeliverVia.subscribe(v => notifDeliverViaLocal = v)
 
   // 'unsupported' | 'denied' | 'subscribed' | 'not-subscribed'
