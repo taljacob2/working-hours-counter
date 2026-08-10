@@ -21,11 +21,19 @@ A personal work-hours tracking app built with **Svelte + Supabase**, deployed to
 ### 1. Create a Supabase project
 
 1. Go to [supabase.com](https://supabase.com) and create a free project.
-2. Open **SQL Editor** and run the entire contents of [`supabase-schema.sql`](./supabase-schema.sql). *(This includes the table creations, RLS policies, and explicit `GRANT` permissions to prevent "permission denied" errors).*
+2. Open **SQL Editor** and run the entire contents of [`supabase-schema.sql`](./supabase-schema.sql). *(This includes the table creations, RLS policies, and explicit `GRANT` permissions to prevent "permission denied" errors).* This one file is enough for a brand-new project — it already reflects every feature below.
 3. Go to **Authentication → Users** and create a user account for yourself.
 4. Go to **Project Settings → API** and copy:
    - **Project URL** — `https://xxxx.supabase.co`
    - **Anon (public) key** — `eyJ…`
+
+> **Upgrading an existing project instead?** The `supabase-migration-*.sql`
+> files are one-time, ordered upgrades for a project that predates a
+> feature — **skip them entirely on a fresh project**, `supabase-schema.sql`
+> already includes everything they do. If you do need them, run in this
+> order (each depends on the one before it):
+> 1. [`supabase-migration-multiuser.sql`](./supabase-migration-multiuser.sql) — adds `user_id` + per-user RLS (needed if your project predates multi-tenant signup)
+> 2. [`supabase-migration-cascade-delete.sql`](./supabase-migration-cascade-delete.sql) — makes `user_id` foreign keys `ON DELETE CASCADE` (needed if your project predates self-service account deletion); requires #1 to have already run, since it looks up the `user_id` foreign key that migration creates
 
 ### 2. (Optional) Let users sign in immediately, without email confirmation
 
