@@ -57,7 +57,9 @@ export async function rescheduleAll({
   morningEnabled, morningTime,
   eveningEnabled, eveningTime,
   offDaysArr, dayOverridesObj,
+  deliverVia = 'native',
 }) {
+  if (deliverVia === 'push') return  // user chose Web Push only — native scheduling would duplicate it
   const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
 
@@ -169,4 +171,72 @@ export async function cancelTargetReached() {
   const { plugin } = (await getPlugin()) || {}
   if (!plugin) return
   await plugin.cancel({ notifications: [{ id: ID_TARGET }] }).catch(() => {})
+}
+
+// ── Web Push (installed PWA, non-native) ──────────────────────
+// Actual scheduling/sending happens server-side (scripts/send-notifications.mjs,
+// run on a GitHub Actions cron) since no browser can wake up and fire a future
+// local notification on its own. This section only manages the subscription —
+// telling the server "here's a device that wants pushes."
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = atob(base64)
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)))
+}
+
+/**
+ * True only when Web Push can actually work here: iOS (and most browsers)
+ * only expose these APIs to an installed/standalone app, not a regular tab.
+ */
+export function isPushSupported() {
+  if (typeof window === 'undefined' || isNative()) return false
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && standalone
+}
+
+/** 'unsupported' | 'denied' | 'subscribed' | 'not-subscribed' */
+export async function getPushSubscriptionStatus() {
+  if (!isPushSupported()) return 'unsupported'
+  if (Notification.permission === 'denied') return 'denied'
+  const registration = await navigator.serviceWorker.getRegistration()
+  const subscription = await registration?.pushManager.getSubscription()
+  return subscription ? 'subscribed' : 'not-subscribed'
+}
+
+/** Request permission, subscribe this device, and store the subscription in Supabase. */
+export async function subscribeToPush(sb) {
+  if (!isPushSupported()) return false
+  const permission = await Notification.requestPermission()
+  if (permission !== 'granted') return false
+
+  const vapidKey = import.meta.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+  if (!vapidKey) { console.warn('[Push] Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY'); return false }
+
+  const registration = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`)
+  await navigator.serviceWorker.ready
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidKey),
+  })
+  const json = subscription.toJSON()
+  const { error } = await sb.from('push_subscriptions').upsert([{
+    endpoint: json.endpoint,
+    p256dh: json.keys.p256dh,
+    auth: json.keys.auth,
+  }], { onConflict: 'endpoint' })
+  if (error) console.warn('[Push] Failed to store subscription:', error)
+  return !error
+}
+
+/** Unsubscribe this device and remove its stored subscription. */
+export async function unsubscribeFromPush(sb) {
+  if (!('serviceWorker' in navigator)) return
+  const registration = await navigator.serviceWorker.getRegistration()
+  const subscription = await registration?.pushManager.getSubscription()
+  if (!subscription) return
+  const endpoint = subscription.endpoint
+  await subscription.unsubscribe()
+  await sb.from('push_subscriptions').delete().eq('endpoint', endpoint)
 }

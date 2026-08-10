@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
-  import { requestNotificationPermission } from '../lib/notifications.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
+  import { requestNotificationPermission, isPushSupported, getPushSubscriptionStatus, subscribeToPush, unsubscribeFromPush } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
   import { monthBounds } from '../lib/timeUtils.js'
@@ -97,10 +97,29 @@
   notifTargetEnabled.subscribe(v => notifTargetEnabledLocal = v)
   let notifTargetHoursLocal = null
   notifTargetHoursOverride.subscribe(v => notifTargetHoursLocal = v)
+  let notifDeliverViaLocal = 'native'
+  notifDeliverVia.subscribe(v => notifDeliverViaLocal = v)
+
+  // 'unsupported' | 'denied' | 'subscribed' | 'not-subscribed'
+  let pushStatus = 'unsupported'
+  onMount(async () => { pushStatus = await getPushSubscriptionStatus() })
+
+  async function enablePush() {
+    const sb = getSupabase()
+    const ok = await subscribeToPush(sb)
+    pushStatus = await getPushSubscriptionStatus()
+    if (!ok) showToast('Could not enable push — check notification permission for this app', 'error')
+  }
+
+  async function disablePush() {
+    const sb = getSupabase()
+    await unsubscribeFromPush(sb)
+    pushStatus = await getPushSubscriptionStatus()
+  }
 
   async function toggleNotif(store, localSetter, newValue) {
     localSetter(newValue)  // apply immediately so the settings row appears
-    if (newValue) {
+    if (newValue && notifDeliverViaLocal !== 'push') {
       const granted = await requestNotificationPermission()
       if (!granted) showToast('Grant notification permission in system settings', 'error')
     }
@@ -188,6 +207,8 @@
     localStorage.setItem('whl_notif_target', String(notifTargetEnabledLocal))
     notifTargetHoursOverride.set(notifTargetHoursLocal)
     localStorage.setItem('whl_notif_target_hours', notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '')
+    notifDeliverVia.set(notifDeliverViaLocal)
+    localStorage.setItem('whl_notif_deliver_via', notifDeliverViaLocal)
 
     const upsertRows = [
       { key: 'requiredDailyHours', value: String(reqHoursLocal) },
@@ -203,6 +224,7 @@
       { key: 'notifEveningTime',    value: notifEveningTimeLocal },
       { key: 'notifTargetEnabled',  value: String(notifTargetEnabledLocal) },
       { key: 'notifTargetHoursOverride', value: notifTargetHoursLocal != null ? String(notifTargetHoursLocal) : '' },
+      { key: 'notifDeliverVia', value: notifDeliverViaLocal },
       { key: 'companyName', value: companyNameLocal },
       { key: 'employeeName', value: employeeNameLocal },
       { key: 'employeeCode', value: employeeCodeLocal },
@@ -697,11 +719,44 @@
   </CollapsibleSection>
 
   <CollapsibleSection title="Notifications" icon="🔔">
-    {#if !window?.Capacitor?.isNativePlatform?.()}
-      <p class="info-text" style="margin-bottom: 0.75rem; font-size: 0.78rem;">
-        Notifications only fire on the Android app. Settings saved here sync via Supabase and take effect next time the app opens.
-      </p>
-    {/if}
+      <!-- Delivery channel -->
+      <div class="notif-row">
+        <div class="notif-info">
+          <span class="notif-label">Delivery</span>
+          <span class="notif-desc">Reminders can come from the Android app, an installed web app (push), or both — pick one to avoid duplicates</span>
+        </div>
+        <select bind:value={notifDeliverViaLocal} class="time-input" style="width:auto">
+          <option value="native">Android app</option>
+          <option value="push">Push (web app)</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+
+      {#if notifDeliverViaLocal !== 'native'}
+        <div class="notif-row">
+          <div class="notif-info">
+            <span class="notif-label">Push on this device</span>
+            <span class="notif-desc">
+              {#if pushStatus === 'unsupported'}
+                Not available here — add this app to your Home Screen first, then reopen Settings.
+              {:else if pushStatus === 'denied'}
+                Permission denied — enable notifications for this app in system settings.
+              {:else if pushStatus === 'subscribed'}
+                Enabled on this device ✓
+              {:else}
+                Not yet enabled on this device.
+              {/if}
+            </span>
+          </div>
+          {#if pushStatus === 'not-subscribed'}
+            <button class="btn btn-sm btn-secondary" on:click={enablePush}>Enable</button>
+          {:else if pushStatus === 'subscribed'}
+            <button class="btn btn-sm btn-secondary" on:click={disablePush}>Disable</button>
+          {/if}
+        </div>
+      {/if}
+
+      <hr class="divider" />
 
       <!-- Morning check-in reminder -->
       <div class="notif-row">

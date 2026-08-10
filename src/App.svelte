@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -80,7 +80,7 @@
     // device ever having actually granted the OS permission — verify/request
     // it here too, not just from the Settings toggle, so a silent permission
     // gap doesn't just fail every scheduled notification with no feedback.
-    if ($notifMorningEnabled || $notifEveningEnabled || $notifTargetEnabled) {
+    if (($notifMorningEnabled || $notifEveningEnabled || $notifTargetEnabled) && $notifDeliverVia !== 'push') {
       const granted = await requestNotificationPermission()
       if (!granted) showToast('Notification permission not granted — reminders won\'t fire. Enable it in system settings.', 'error')
     }
@@ -91,13 +91,14 @@
       eveningTime:    $notifEveningTime,
       offDaysArr:     $offDays,
       dayOverridesObj: $dayOverrides,
+      deliverVia:     $notifDeliverVia,
     })
   }
 
   $: if (notifReady) scheduleNotifications(
     $notifMorningEnabled, $notifMorningTime,
     $notifEveningEnabled, $notifEveningTime,
-    $offDays, $dayOverrides
+    $offDays, $dayOverrides, $notifDeliverVia
   )
 
   onDestroy(stopGeoFence)
@@ -208,6 +209,8 @@
       const nthoLocal = localStorage.getItem('whl_notif_target_hours')
       const nthoRaw = ntho ?? nthoLocal ?? ''
       notifTargetHoursOverride.set(nthoRaw && nthoRaw !== '' ? parseFloat(nthoRaw) : null)
+      const ndv = settings?.find(s => s.key === 'notifDeliverVia')?.value
+      notifDeliverVia.set(ndv ?? localStorage.getItem('whl_notif_deliver_via') ?? 'native')
 
       const echh = settings?.find(s => s.key === 'excelColorHomeHours')?.value
       excelColorHomeHours.set((echh ?? localStorage.getItem('whl_excel_color_home') ?? 'false') === 'true')

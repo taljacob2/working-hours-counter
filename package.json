@@ -11,14 +11,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "send-notifications": "node scripts/send-notifications.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.4",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "svelte": "^5.55.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "web-push": "^3.6.7"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
