@@ -210,7 +210,7 @@
       const nthoRaw = ntho ?? nthoLocal ?? ''
       notifTargetHoursOverride.set(nthoRaw && nthoRaw !== '' ? parseFloat(nthoRaw) : null)
       const ndv = settings?.find(s => s.key === 'notifDeliverVia')?.value
-      notifDeliverVia.set(ndv ?? localStorage.getItem('whl_notif_deliver_via') ?? 'native')
+      notifDeliverVia.set(ndv ?? localStorage.getItem('whl_notif_deliver_via') ?? 'both')
 
       const echh = settings?.find(s => s.key === 'excelColorHomeHours')?.value
       excelColorHomeHours.set((echh ?? localStorage.getItem('whl_excel_color_home') ?? 'false') === 'true')
