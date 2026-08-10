@@ -8,9 +8,12 @@
   let error = ''
 
   const SQL = `-- Run this in your Supabase SQL Editor (Dashboard → SQL Editor)
+-- Multi-user: each account's rows are isolated by user_id via RLS, so
+-- multiple people can sign up and use this same project independently.
 
 create table public.work_logs (
   id text primary key,
+  user_id uuid not null default auth.uid() references auth.users(id),
   platform text not null check (platform in ('office','home')),
   action text not null check (action in ('resume','pause')),
   timestamp timestamptz not null,
@@ -19,21 +22,49 @@ create table public.work_logs (
   note text default ''
 );
 alter table public.work_logs enable row level security;
-create policy "Auth users full access" on public.work_logs
-  for all to authenticated using (true) with check (true);
+create policy "own rows only" on public.work_logs
+  for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 create table public.work_settings (
-  key text primary key,
-  value text not null
+  user_id uuid not null default auth.uid() references auth.users(id),
+  key text not null,
+  value text not null,
+  primary key (user_id, key)
 );
 alter table public.work_settings enable row level security;
-create policy "Auth users full access" on public.work_settings
-  for all to authenticated using (true) with check (true);
+create policy "own rows only" on public.work_settings
+  for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users(id),
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+create policy "own rows only" on public.push_subscriptions
+  for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create table public.rebalance_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id),
+  month_key text not null,
+  applied_at timestamptz not null default now(),
+  delta jsonb not null,
+  summary jsonb not null
+);
+alter table public.rebalance_history enable row level security;
+create policy "own rows only" on public.rebalance_history
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- Grant explicit permissions
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on table public.work_logs to anon, authenticated;
-grant select, insert, update, delete on table public.work_settings to anon, authenticated;`
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.work_logs to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.work_settings to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.push_subscriptions to anon, authenticated, service_role;
+grant select, insert, update, delete on table public.rebalance_history to anon, authenticated, service_role;`
 
   let copied = false
   function copySQL() {

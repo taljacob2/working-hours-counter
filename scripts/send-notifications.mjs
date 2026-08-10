@@ -51,20 +51,18 @@ function pastOrAt(hour, minute, targetHHMM) {
   return hour > th || (hour === th && minute >= tm)
 }
 
-async function main() {
-  const now = new Date()
-  const { dateKey: today, hour, minute } = localParts(now)
-
-  const { data: settingsRows, error: settingsErr } = await sb.from('work_settings').select('key, value')
+// Each user's push subscriptions, settings, and logs are all scoped by their
+// own user_id — running as service_role bypasses RLS entirely, so unlike the
+// browser client this script has to filter explicitly at every query instead
+// of relying on Postgres to do it.
+async function processUser(userId, subs, today, hour, minute, now) {
+  const { data: settingsRows, error: settingsErr } = await sb
+    .from('work_settings').select('key, value').eq('user_id', userId)
   if (settingsErr) throw settingsErr
   const s = Object.fromEntries((settingsRows || []).map(r => [r.key, r.value]))
 
   const deliverVia = s.notifDeliverVia || 'both'
-  if (deliverVia === 'native') { console.log('notifDeliverVia=native — nothing to do here'); return }
-
-  const { data: subs, error: subsErr } = await sb.from('push_subscriptions').select('*')
-  if (subsErr) throw subsErr
-  if (!subs || subs.length === 0) { console.log('No push subscriptions registered — nothing to do'); return }
+  if (deliverVia === 'native') { console.log(`[${userId}] notifDeliverVia=native — nothing to do`); return }
 
   const offDaysArr = JSON.parse(s.offDays || '[0,6]')
   const dayOverridesObj = JSON.parse(s.dayOverrides || '{}')
@@ -72,7 +70,7 @@ async function main() {
   const todaysOff = isOffDay(today, offDaysArr, dayOverridesObj)
 
   const { data: todaysLogs, error: logsErr } = await sb
-    .from('work_logs').select('*').eq('date_key', today).order('timestamp', { ascending: true })
+    .from('work_logs').select('*').eq('user_id', userId).eq('date_key', today).order('timestamp', { ascending: true })
   if (logsErr) throw logsErr
   const hasAnyLogToday = (todaysLogs || []).length > 0
 
@@ -103,7 +101,7 @@ async function main() {
     }
   }
 
-  if (toSend.length === 0) { console.log('Nothing to send this run'); return }
+  if (toSend.length === 0) { console.log(`[${userId}] Nothing to send this run`); return }
 
   for (const item of toSend) {
     let anySent = false
@@ -112,22 +110,41 @@ async function main() {
       try {
         await webpush.sendNotification(pushSubscription, JSON.stringify({ title: item.title, body: item.body }))
         anySent = true
-        console.log(`Sent "${item.title}" to subscription ${sub.id}`)
+        console.log(`[${userId}] Sent "${item.title}" to subscription ${sub.id}`)
       } catch (err) {
         if (err.statusCode === 404 || err.statusCode === 410) {
-          console.log(`Subscription ${sub.id} is gone (${err.statusCode}) — removing it`)
+          console.log(`[${userId}] Subscription ${sub.id} is gone (${err.statusCode}) — removing it`)
           await sb.from('push_subscriptions').delete().eq('id', sub.id)
         } else {
-          console.warn(`Send failed for subscription ${sub.id} (status ${err.statusCode}):`, err.message)
+          console.warn(`[${userId}] Send failed for subscription ${sub.id} (status ${err.statusCode}):`, err.message)
         }
       }
     }
     // Only mark as sent if it actually reached at least one device — if every
     // send failed (all stale), leave the marker unset so the next run retries.
     if (anySent) {
-      const { error } = await sb.from('work_settings').upsert([{ key: item.marker, value: item.value }])
-      if (error) console.warn(`Failed to record marker ${item.marker}:`, error.message)
+      const { error } = await sb.from('work_settings').upsert([{ user_id: userId, key: item.marker, value: item.value }])
+      if (error) console.warn(`[${userId}] Failed to record marker ${item.marker}:`, error.message)
     }
+  }
+}
+
+async function main() {
+  const now = new Date()
+  const { dateKey: today, hour, minute } = localParts(now)
+
+  const { data: subs, error: subsErr } = await sb.from('push_subscriptions').select('*')
+  if (subsErr) throw subsErr
+  if (!subs || subs.length === 0) { console.log('No push subscriptions registered — nothing to do'); return }
+
+  const subsByUser = new Map()
+  for (const sub of subs) {
+    if (!subsByUser.has(sub.user_id)) subsByUser.set(sub.user_id, [])
+    subsByUser.get(sub.user_id).push(sub)
+  }
+
+  for (const [userId, userSubs] of subsByUser) {
+    await processUser(userId, userSubs, today, hour, minute, now)
   }
 }
 
