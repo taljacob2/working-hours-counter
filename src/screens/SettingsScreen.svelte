@@ -9,9 +9,14 @@
   import ExcelReportOptions from '../components/ExcelReportOptions.svelte'
   import GenerateReportButton from '../components/GenerateReportButton.svelte'
   import CollapsibleSection from '../components/CollapsibleSection.svelte'
-  import { parseXlsHeader, warmUpPyodide, isPyodideReady } from '../lib/pyodideBridge.js'
+  import { parseXlsHeader, isPyodideReady, pyodideStatus } from '../lib/pyodideBridge.js'
 
-  warmUpPyodide()
+  // 'idle' | 'loading' | 'ready' | 'error' — drives the loading bar in the
+  // Excel Reports section. Pyodide itself only starts loading once that
+  // section is opened (ExcelMergeButton/GenerateReportButton warm it up on
+  // mount), so the rest of Settings is never blocked by it.
+  let pyodideStatusLocal = 'idle'
+  pyodideStatus.subscribe(v => pyodideStatusLocal = v)
 
   let reqHoursLocal = 9
   requiredHours.subscribe(v => reqHoursLocal = v)
@@ -901,6 +906,17 @@
   </CollapsibleSection>
 
   <CollapsibleSection title="Excel Reports" icon="📊">
+    {#if pyodideStatusLocal === 'loading'}
+      <div class="engine-status">
+        <div class="engine-bar-track"><div class="engine-bar-fill"></div></div>
+        <span class="engine-status-text">Preparing the Excel engine (one-time, a few seconds)…</span>
+      </div>
+    {:else if pyodideStatusLocal === 'error'}
+      <div class="engine-status engine-status-error">
+        ⚠ Couldn't load the Excel engine — check your connection and try again.
+      </div>
+    {/if}
+
     <ExcelReportOptions />
 
     <ExcelMergeButton />
@@ -1136,6 +1152,39 @@
   }
   .notif-time-label { font-size: 0.82rem; color: var(--color-text-muted); }
   .time-input { width: 120px; text-align: center; }
+
+  /* ── Excel engine (Pyodide) loading state ── */
+  .engine-status {
+    margin-bottom: var(--space-4);
+  }
+  .engine-status-text {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+  }
+  .engine-bar-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+  }
+  .engine-bar-fill {
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: var(--color-primary);
+    animation: engine-bar-sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes engine-bar-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+  .engine-status-error {
+    font-size: 0.82rem;
+    color: var(--color-danger);
+  }
 
   /* iOS-style toggle */
   .toggle { position: relative; display: inline-block; width: 44px; height: 26px; flex-shrink: 0; cursor: pointer; }

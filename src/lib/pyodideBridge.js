@@ -10,6 +10,8 @@
 // across sites' browser caches. Keep PYODIDE_VERSION in sync with the
 // `pyodide` devDependency version in package.json.
 
+import { writable } from 'svelte/store'
+
 const PYODIDE_VERSION = '314.0.3'
 const PYODIDE_CDN_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
 
@@ -22,31 +24,45 @@ export function isPyodideReady() {
   return pyodideReady
 }
 
+// 'idle' | 'loading' | 'ready' | 'error' — lets the Excel Reports section show
+// its own loading bar without touching the rest of the Settings screen.
+export const pyodideStatus = writable('idle')
+
 async function initPyodide() {
-  const { loadPyodide } = await import(/* @vite-ignore */ `${PYODIDE_CDN_BASE}pyodide.mjs`)
-  const pyodide = await loadPyodide({ indexURL: PYODIDE_CDN_BASE })
+  pyodideStatus.set('loading')
+  try {
+    const { loadPyodide } = await import(/* @vite-ignore */ `${PYODIDE_CDN_BASE}pyodide.mjs`)
+    const pyodide = await loadPyodide({ indexURL: PYODIDE_CDN_BASE })
 
-  await pyodide.loadPackage('micropip')
-  const micropip = pyodide.pyimport('micropip')
-  // Pinned to match requirements.txt — same versions the local CLI uses.
-  await micropip.install(['xlrd==2.0.2', 'xlwt==1.3.0', 'xlutils==2.0.0'])
+    await pyodide.loadPackage('micropip')
+    const micropip = pyodide.pyimport('micropip')
+    // Pinned to match requirements.txt — same versions the local CLI uses.
+    await micropip.install(['xlrd==2.0.2', 'xlwt==1.3.0', 'xlutils==2.0.0'])
 
-  const base = import.meta.env.BASE_URL
-  const [reportCoreSrc, webBridgeSrc] = await Promise.all([
-    fetch(`${base}py/report_core.py`).then(r => r.text()),
-    fetch(`${base}py/web_bridge.py`).then(r => r.text()),
-  ])
-  pyodide.FS.writeFile('/report_core.py', reportCoreSrc)
-  pyodide.FS.writeFile('/web_bridge.py', webBridgeSrc)
-  pyodide.runPython(`
+    const base = import.meta.env.BASE_URL
+    const [reportCoreSrc, webBridgeSrc] = await Promise.all([
+      fetch(`${base}py/report_core.py`).then(r => r.text()),
+      fetch(`${base}py/web_bridge.py`).then(r => r.text()),
+    ])
+    pyodide.FS.writeFile('/report_core.py', reportCoreSrc)
+    pyodide.FS.writeFile('/web_bridge.py', webBridgeSrc)
+    pyodide.runPython(`
 import sys
 if '/' not in sys.path:
     sys.path.insert(0, '/')
 import web_bridge
 `)
 
-  pyodideReady = true
-  return pyodide
+    pyodideReady = true
+    pyodideStatus.set('ready')
+    return pyodide
+  } catch (err) {
+    // Let a later call (e.g. an actual button click) retry from scratch
+    // instead of forever replaying the same cached rejection.
+    pyodidePromise = null
+    pyodideStatus.set('error')
+    throw err
+  }
 }
 
 function getPyodide() {
