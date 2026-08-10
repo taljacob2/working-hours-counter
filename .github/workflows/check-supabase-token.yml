@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ensure warning label exists
-        run: gh label create supabase-token-expiry --color B60205 --description "Supabase deploy token needs refreshing" --force
+        run: gh label create supabase-token-expiry --color B60205 --description "Supabase deploy token needs refreshing" --force --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -39,9 +39,10 @@ jobs:
       - name: Open issue if the token check failed
         if: steps.check.outcome == 'failure'
         run: |
-          existing="$(gh issue list --label supabase-token-expiry --state open --json number -q '.[0].number')"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label supabase-token-expiry --state open --json number -q '.[0].number')"
           if [ -z "$existing" ]; then
             gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
               --title "SUPABASE_ACCESS_TOKEN check failed - may need refreshing" \
               --label supabase-token-expiry \
               --assignee taljacob2 \
@@ -61,7 +62,7 @@ jobs:
       - name: Close issue if the token is working again
         if: steps.check.outcome == 'success'
         run: |
-          gh issue list --label supabase-token-expiry --state open --json number -q '.[].number' | \
-            xargs -r -I{} gh issue close {} --comment "Token check passed again — closing."
+          gh issue list --repo "$GITHUB_REPOSITORY" --label supabase-token-expiry --state open --json number -q '.[].number' | \
+            xargs -r -I{} gh issue close {} --repo "$GITHUB_REPOSITORY" --comment "Token check passed again — closing."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
