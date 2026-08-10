@@ -6,7 +6,20 @@
   let email = ''
   let password = ''
   let error = ''
+  let info = ''
   let busy = false
+  let mode = 'signin' // 'signin' | 'signup'
+
+  function switchMode(next) {
+    mode = next
+    error = ''
+    info = ''
+  }
+
+  async function submit() {
+    if (mode === 'signup') return signUp()
+    return signIn()
+  }
 
   async function signIn() {
     error = ''
@@ -15,7 +28,7 @@
     const { data, error: err } = await sb.auth.signInWithPassword({ email, password })
     if (err) { error = err.message; busy = false; return }
     user.set(data.user)
-    
+
     try {
       await loadAll(sb)
       screen.set('main')
@@ -24,6 +37,37 @@
     } finally {
       busy = false
     }
+  }
+
+  async function signUp() {
+    error = ''
+    info = ''
+    busy = true
+    const sb = getSupabase()
+    const { data, error: err } = await sb.auth.signUp({ email, password })
+    if (err) { error = err.message; busy = false; return }
+
+    if (data.session) {
+      // Email confirmation is disabled on this project — signUp already
+      // returned a live session, so go straight in like a normal sign-in.
+      user.set(data.user)
+      try {
+        await loadAll(sb)
+        screen.set('main')
+      } catch (e) {
+        error = e.message || 'Failed to load data after sign up.'
+      } finally {
+        busy = false
+      }
+      return
+    }
+
+    // Email confirmation is required — no session yet, account exists but
+    // is inactive until the user clicks the link Supabase just emailed them.
+    info = 'Account created — check your email to confirm it, then sign in.'
+    mode = 'signin'
+    password = ''
+    busy = false
   }
 
   async function loadAll(sb) {
@@ -54,26 +98,37 @@
   <div class="auth-card">
     <div class="auth-logo">⏱</div>
     <h1>Work Hours Logger</h1>
-    <p class="auth-subtitle">Sign in to access your logs.</p>
+    <p class="auth-subtitle">{mode === 'signup' ? 'Create an account to start tracking your hours.' : 'Sign in to access your logs.'}</p>
 
-    <form on:submit|preventDefault={signIn}>
+    <form on:submit|preventDefault={submit}>
       <div class="field">
         <label for="si-email">Email</label>
         <input id="si-email" type="email" bind:value={email} placeholder="you@example.com" required autocomplete="email" />
       </div>
       <div class="field">
         <label for="si-password">Password</label>
-        <input id="si-password" type="password" bind:value={password} placeholder="••••••••" required autocomplete="current-password" />
+        <input id="si-password" type="password" bind:value={password} placeholder="••••••••" required autocomplete={mode === 'signup' ? 'new-password' : 'current-password'} minlength={mode === 'signup' ? 6 : undefined} />
       </div>
       {#if error}<p class="form-error">⚠️ {error}</p>{/if}
+      {#if info}<p class="form-info">✅ {info}</p>{/if}
       <button type="submit" class="btn btn-primary btn-full" disabled={busy} style="margin-top:1.25rem">
         {#if busy}
-          <span class="spin"></span> Signing in…
+          <span class="spin"></span> {mode === 'signup' ? 'Creating account…' : 'Signing in…'}
         {:else}
-          Sign in →
+          {mode === 'signup' ? 'Create account →' : 'Sign in →'}
         {/if}
       </button>
     </form>
+
+    <p class="reconfigure-hint">
+      {#if mode === 'signup'}
+        Already have an account?
+        <button class="link-btn" on:click={() => switchMode('signin')}>Sign in</button>
+      {:else}
+        New here?
+        <button class="link-btn" on:click={() => switchMode('signup')}>Create an account</button>
+      {/if}
+    </p>
 
     <p class="reconfigure-hint">
       Wrong project?
@@ -103,6 +158,7 @@
   h1 { text-align: center; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.375rem; }
   .auth-subtitle { text-align: center; color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
   .form-error { color: var(--color-ot-neg); font-size: 0.875rem; margin-top: 0.5rem; }
+  .form-info { color: var(--color-primary); font-size: 0.875rem; margin-top: 0.5rem; }
   .reconfigure-hint { text-align: center; font-size: 0.8rem; color: var(--color-text-muted); margin-top: 1.25rem; }
   .link-btn { background: none; border: none; color: var(--color-primary); cursor: pointer; font-size: 0.8rem; text-decoration: underline; }
   .spin {

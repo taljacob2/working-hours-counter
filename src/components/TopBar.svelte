@@ -22,6 +22,7 @@
   async function signOut() {
     const sb = getSupabase()
     await sb.auth.signOut()
+    user.set(null)
     screen.set('signin')
     showToast('Signed out', 'info')
   }

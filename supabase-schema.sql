@@ -5,8 +5,12 @@
 -- ============================================================
 
 -- 1. Work logs table
+-- user_id defaults to auth.uid() so every insert from a signed-in browser is
+-- automatically attributed to that account with no client-side code needed;
+-- the RLS policy below then keeps each account's rows fully isolated.
 create table if not exists public.work_logs (
   id          text        primary key,
+  user_id     uuid        not null default auth.uid() references auth.users(id),
   platform    text        not null check (platform in ('office', 'home')),
   action      text        not null check (action in ('resume', 'pause')),
   timestamp   timestamptz not null,
@@ -18,28 +22,31 @@ create table if not exists public.work_logs (
 alter table public.work_logs enable row level security;
 
 do $$ begin
-  create policy "Auth users full access"
+  create policy "own rows only"
     on public.work_logs for all to authenticated
-    using (true) with check (true);
+    using (user_id = auth.uid()) with check (user_id = auth.uid());
 exception when duplicate_object then null;
 end $$;
 
 create index if not exists work_logs_date_key_idx on public.work_logs (date_key);
+create index if not exists work_logs_user_id_idx on public.work_logs (user_id);
 
 -- ============================================================
 
--- 2. Settings table
+-- 2. Settings table (flat key/value, one row per setting per user)
 create table if not exists public.work_settings (
-  key   text primary key,
-  value text not null
+  user_id uuid not null default auth.uid() references auth.users(id),
+  key     text not null,
+  value   text not null,
+  primary key (user_id, key)
 );
 
 alter table public.work_settings enable row level security;
 
 do $$ begin
-  create policy "Auth users full access"
+  create policy "own rows only"
     on public.work_settings for all to authenticated
-    using (true) with check (true);
+    using (user_id = auth.uid()) with check (user_id = auth.uid());
 exception when duplicate_object then null;
 end $$;
 
@@ -73,6 +80,7 @@ create index if not exists rebalance_history_user_month_idx
 -- 4. Web Push subscriptions (installed PWA notification delivery)
 create table if not exists public.push_subscriptions (
   id         uuid        primary key default gen_random_uuid(),
+  user_id    uuid        not null default auth.uid() references auth.users(id),
   endpoint   text        not null unique,
   p256dh     text        not null,
   auth       text        not null,
@@ -82,11 +90,13 @@ create table if not exists public.push_subscriptions (
 alter table public.push_subscriptions enable row level security;
 
 do $$ begin
-  create policy "Auth users full access"
+  create policy "own rows only"
     on public.push_subscriptions for all to authenticated
-    using (true) with check (true);
+    using (user_id = auth.uid()) with check (user_id = auth.uid());
 exception when duplicate_object then null;
 end $$;
+
+create index if not exists push_subscriptions_user_id_idx on public.push_subscriptions (user_id);
 
 -- ============================================================
 

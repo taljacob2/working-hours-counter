@@ -221,10 +221,16 @@ export async function subscribeToPush(sb) {
     applicationServerKey: urlBase64ToUint8Array(vapidKey),
   })
   const json = subscription.toJSON()
+  // user_id must be explicit, not left to the column default: on an upsert
+  // conflict (same device re-subscribing under a different account),
+  // PostgREST only updates columns present in the payload, so a bare
+  // default(auth.uid()) would only ever take effect on first insert.
+  const { data: { user } } = await sb.auth.getUser()
   const { error } = await sb.from('push_subscriptions').upsert([{
     endpoint: json.endpoint,
     p256dh: json.keys.p256dh,
     auth: json.keys.auth,
+    user_id: user.id,
   }], { onConflict: 'endpoint' })
   if (error) console.warn('[Push] Failed to store subscription:', error)
   return !error
