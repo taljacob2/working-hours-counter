@@ -2,6 +2,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { screen, user, logs, requiredHours, minimumDailyHours, use24HourFormat, loading, showToast } from '../stores/appStore.js'
   import { byTs } from '../lib/timeUtils.js'
+  import { OAUTH_PROVIDERS, hasEnabledOAuthProvider } from '../lib/authProviders.js'
 
   let email = ''
   let password = ''
@@ -138,15 +139,21 @@
       </button>
     </form>
 
-    <div class="oauth-divider"><span>or</span></div>
-    <div class="oauth-buttons">
-      <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('google')}>
-        Continue with Google
-      </button>
-      <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('github')}>
-        Continue with GitHub
-      </button>
-    </div>
+    {#if hasEnabledOAuthProvider}
+      <div class="oauth-divider"><span>or</span></div>
+      <div class="oauth-buttons">
+        {#if OAUTH_PROVIDERS.google}
+          <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('google')}>
+            Continue with Google
+          </button>
+        {/if}
+        {#if OAUTH_PROVIDERS.github}
+          <button type="button" class="btn btn-secondary btn-full" on:click={() => signInWithProvider('github')}>
+            Continue with GitHub
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     <p class="reconfigure-hint">
       {#if mode === 'signup'}

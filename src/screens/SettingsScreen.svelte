@@ -10,6 +10,7 @@
   import GenerateReportButton from '../components/GenerateReportButton.svelte'
   import CollapsibleSection from '../components/CollapsibleSection.svelte'
   import { parseXlsHeader, isPyodideReady, pyodideStatus } from '../lib/pyodideBridge.js'
+  import { OAUTH_PROVIDERS, hasEnabledOAuthProvider } from '../lib/authProviders.js'
 
   // 'idle' | 'loading' | 'ready' | 'error' — drives the loading bar in the
   // Excel Reports section. Pyodide itself only starts loading once that
@@ -578,6 +579,7 @@
   // also link Google/GitHub so either one gets them back to the same data.
   let identities = []
   onMount(async () => {
+    if (!hasEnabledOAuthProvider) return
     const sb = getSupabase()
     const { data } = await sb.auth.getUserIdentities()
     identities = data?.identities || []
@@ -1126,23 +1128,29 @@
   <CollapsibleSection title="Account &amp; Connection" icon="👤">
     <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
 
-    <p class="info-text" style="margin-top:1rem;">Linked sign-in methods</p>
-    <div class="linked-row">
-      <span>Google</span>
-      {#if isLinked('google')}
-        <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('google')}>Unlink</button>
-      {:else}
-        <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('google')}>Link</button>
+    {#if hasEnabledOAuthProvider}
+      <p class="info-text" style="margin-top:1rem;">Linked sign-in methods</p>
+      {#if OAUTH_PROVIDERS.google}
+        <div class="linked-row">
+          <span>Google</span>
+          {#if isLinked('google')}
+            <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('google')}>Unlink</button>
+          {:else}
+            <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('google')}>Link</button>
+          {/if}
+        </div>
       {/if}
-    </div>
-    <div class="linked-row">
-      <span>GitHub</span>
-      {#if isLinked('github')}
-        <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('github')}>Unlink</button>
-      {:else}
-        <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('github')}>Link</button>
+      {#if OAUTH_PROVIDERS.github}
+        <div class="linked-row">
+          <span>GitHub</span>
+          {#if isLinked('github')}
+            <button class="btn btn-sm btn-secondary" on:click={() => unlinkProvider('github')}>Unlink</button>
+          {:else}
+            <button class="btn btn-sm btn-secondary" on:click={() => linkProvider('github')}>Link</button>
+          {/if}
+        </div>
       {/if}
-    </div>
+    {/if}
 
     <div class="account-actions">
       <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
