@@ -1,0 +1,67 @@
+name: Check Supabase Deploy Token
+
+# Early warning, not a runtime dependency — SUPABASE_ACCESS_TOKEN is only
+# used by deploy-edge-functions.yml. If it expires, the running app is
+# unaffected; the only consequence is that a future push to
+# supabase/functions/** would fail to deploy until the token is refreshed.
+# This just makes that failure visible months before it'd otherwise be
+# discovered, instead of only at the next real deploy attempt.
+on:
+  schedule:
+    - cron: '0 9 1 * *' # 09:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure warning label exists
+        run: gh label create supabase-token-expiry --color B60205 --description "Supabase deploy token needs refreshing" --force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify token still works
+        id: check
+        run: supabase functions list --project-ref "$SUPABASE_PROJECT_REF"
+        continue-on-error: true
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+
+      - name: Open issue if the token check failed
+        if: steps.check.outcome == 'failure'
+        run: |
+          existing="$(gh issue list --label supabase-token-expiry --state open --json number -q '.[0].number')"
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --title "SUPABASE_ACCESS_TOKEN check failed - may need refreshing" \
+              --label supabase-token-expiry \
+              --assignee taljacob2 \
+              --body "The monthly check for \`SUPABASE_ACCESS_TOKEN\` failed — it's likely expired or revoked.
+
+          This doesn't affect the running app; it only blocks future deploys of Supabase Edge Functions (\`supabase/functions/**\`).
+
+          **Fix:**
+          1. Generate a new token at https://supabase.com/dashboard/account/tokens
+          2. Update the \`SUPABASE_ACCESS_TOKEN\` secret under this repo's Settings > Secrets and variables > Actions
+
+          This issue closes automatically once the check passes again."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Close issue if the token is working again
+        if: steps.check.outcome == 'success'
+        run: |
+          gh issue list --label supabase-token-expiry --state open --json number -q '.[].number' | \
+            xargs -r -I{} gh issue close {} --comment "Token check passed again — closing."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
