@@ -19,9 +19,13 @@ function bytesToBase64(bytes) {
 }
 
 // On Android shows a native "Save to…" folder picker via ACTION_CREATE_DOCUMENT, so
-// the user always knows where the file went. On web falls back to the browser
-// download trick. `content` may be a string (text files) or a Blob/Uint8Array
-// (binary files, e.g. .xls) — binary content is base64-encoded for the native bridge.
+// the user always knows where the file went. On web, uses the File System Access API
+// (showSaveFilePicker) where available so desktop Chrome/Edge users get the same
+// "choose a location" prompt; falls back to the classic anchor-download trick
+// (silent save to the browser's default downloads folder) on browsers that lack it,
+// e.g. Safari/Firefox, or when the picker errors for a reason other than user cancel.
+// `content` may be a string (text files) or a Blob/Uint8Array (binary files, e.g.
+// .xls) — binary content is base64-encoded for the native bridge.
 export async function saveFile(content, filename, mimeType) {
   const isBinary = content instanceof Blob || content instanceof Uint8Array
   if (FileSaver) {
@@ -33,6 +37,25 @@ export async function saveFile(content, filename, mimeType) {
     }
   } else {
     const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType })
+
+    if (window.showSaveFilePicker) {
+      try {
+        const ext = filename.includes('.') ? '.' + filename.split('.').pop() : ''
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: ext ? [{ description: mimeType, accept: { [mimeType]: [ext] } }] : undefined,
+        })
+        const writable = await handle.createWritable()
+        await writable.write(blob)
+        await writable.close()
+        return
+      } catch (err) {
+        if (err?.name === 'AbortError') throw new Error('cancelled')
+        // Any other failure (unsupported context, permission denial, etc.) — fall
+        // through to the classic download below instead of failing the export.
+      }
+    }
+
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
