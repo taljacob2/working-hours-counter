@@ -10,7 +10,7 @@
 -- the RLS policy below then keeps each account's rows fully isolated.
 create table if not exists public.work_logs (
   id          text        primary key,
-  user_id     uuid        not null default auth.uid() references auth.users(id),
+  user_id     uuid        not null default auth.uid() references auth.users(id) on delete cascade,
   platform    text        not null check (platform in ('office', 'home')),
   action      text        not null check (action in ('resume', 'pause')),
   timestamp   timestamptz not null,
@@ -35,7 +35,7 @@ create index if not exists work_logs_user_id_idx on public.work_logs (user_id);
 
 -- 2. Settings table (flat key/value, one row per setting per user)
 create table if not exists public.work_settings (
-  user_id uuid not null default auth.uid() references auth.users(id),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   key     text not null,
   value   text not null,
   primary key (user_id, key)
@@ -55,7 +55,7 @@ end $$;
 -- 3. Rebalance history table
 create table if not exists public.rebalance_history (
   id          uuid        primary key default gen_random_uuid(),
-  user_id     uuid        not null references auth.users(id),
+  user_id     uuid        not null references auth.users(id) on delete cascade,
   month_key   text        not null,   -- 'YYYY-MM'
   applied_at  timestamptz not null default now(),
   delta       jsonb       not null,   -- { inserted_ids, updated, deleted_logs }
@@ -80,7 +80,7 @@ create index if not exists rebalance_history_user_month_idx
 -- 4. Web Push subscriptions (installed PWA notification delivery)
 create table if not exists public.push_subscriptions (
   id         uuid        primary key default gen_random_uuid(),
-  user_id    uuid        not null default auth.uid() references auth.users(id),
+  user_id    uuid        not null default auth.uid() references auth.users(id) on delete cascade,
   endpoint   text        not null unique,
   p256dh     text        not null,
   auth       text        not null,
