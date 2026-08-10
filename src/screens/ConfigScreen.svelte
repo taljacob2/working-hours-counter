@@ -13,7 +13,7 @@
 
 create table public.work_logs (
   id text primary key,
-  user_id uuid not null default auth.uid() references auth.users(id),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   platform text not null check (platform in ('office','home')),
   action text not null check (action in ('resume','pause')),
   timestamp timestamptz not null,
@@ -26,7 +26,7 @@ create policy "own rows only" on public.work_logs
   for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 create table public.work_settings (
-  user_id uuid not null default auth.uid() references auth.users(id),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   key text not null,
   value text not null,
   primary key (user_id, key)
@@ -37,7 +37,7 @@ create policy "own rows only" on public.work_settings
 
 create table public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users(id),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   endpoint text not null unique,
   p256dh text not null,
   auth text not null,
@@ -49,7 +49,7 @@ create policy "own rows only" on public.push_subscriptions
 
 create table public.rebalance_history (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id),
+  user_id uuid not null references auth.users(id) on delete cascade,
   month_key text not null,
   applied_at timestamptz not null default now(),
   delta jsonb not null,

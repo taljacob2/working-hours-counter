@@ -574,6 +574,33 @@
     showToast('Signed out', 'info')
   }
 
+  // Calls the delete-account Edge Function (needs the service_role key to
+  // remove the auth.users row, which no client-side API can do). All the
+  // user's data tables are ON DELETE CASCADE, so this one call wipes
+  // everything — see supabase/functions/delete-account/index.ts.
+  let deletingAccount = false
+  async function deleteAccount() {
+    if (!window.confirm(
+      "Delete your account permanently?\n\nThis removes your login and ALL your data — logs, settings, notification subscriptions, and rebalance history. This cannot be undone."
+    )) return
+
+    deletingAccount = true
+    const sb = getSupabase()
+    try {
+      const { data, error } = await sb.functions.invoke('delete-account')
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      await sb.auth.signOut()
+      user.set(null)
+      screen.set('signin')
+      showToast('Your account has been deleted', 'info')
+    } catch (e) {
+      showToast('Could not delete account: ' + e.message, 'error')
+    } finally {
+      deletingAccount = false
+    }
+  }
+
   // Which sign-in methods (email, google, github) are attached to this
   // account — lets someone who originally signed up with email/password
   // also link Google/GitHub so either one gets them back to the same data.
@@ -1156,6 +1183,13 @@
       <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
       <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
     </div>
+
+    <div class="danger-zone">
+      <p class="info-text">Permanently delete your account and all your data — logs, settings, notification subscriptions, and rebalance history. This can't be undone.</p>
+      <button class="btn btn-danger" style="width:100%" on:click={deleteAccount} disabled={deletingAccount}>
+        {deletingAccount ? 'Deleting…' : '🗑️ Delete my account'}
+      </button>
+    </div>
   </CollapsibleSection>
 </div>
 
@@ -1173,6 +1207,8 @@
   .info-text { font-size: 0.875rem; color: var(--color-text-muted); line-height: 1.6; }
   .info-text code { font-size: 0.8rem; background: var(--color-surface-2); padding: 2px 6px; border-radius: 4px; }
   .account-actions { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; }
+  .danger-zone { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+  .danger-zone .info-text { margin-bottom: 0.5rem; }
   .linked-row { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--color-border); }
   .linked-row:last-of-type { border-bottom: none; }
   .office-loc-card { margin-top: 0.75rem; padding: 0.75rem; background: var(--color-surface-2); border-radius: var(--radius-sm); border: 1.5px solid var(--color-border); }

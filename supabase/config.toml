@@ -1,0 +1,4 @@
+# Minimal config so the Supabase CLI recognizes this as a project root for
+# `supabase functions deploy`. Not used for local `supabase start` — this
+# repo has no other Supabase-CLI-managed local dev flow.
+project_id = "jdxeuirbmpaeetisrolu"
