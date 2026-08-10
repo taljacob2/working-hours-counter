@@ -58,7 +58,11 @@
     info = ''
     busy = true
     const sb = getSupabase()
-    const { data, error: err } = await sb.auth.signUp({ email, password })
+    const { data, error: err } = await sb.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL },
+    })
     if (err) { error = err.message; busy = false; return }
 
     if (data.session) {
