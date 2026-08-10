@@ -27,7 +27,35 @@ A personal work-hours tracking app built with **Svelte + Supabase**, deployed to
    - **Project URL** — `https://xxxx.supabase.co`
    - **Anon (public) key** — `eyJ…`
 
-### 2. Configure credentials (optional — recommended for local dev)
+### 2. (Optional) Let users sign in immediately, without email confirmation
+
+By default Supabase requires new users to click a confirmation link in their
+email before they can sign in — after signup they'll see "check your email
+to confirm it, then sign in."
+
+Some users don't want that extra step. This isn't controlled by this app's
+code — email confirmation is a setting enforced by Supabase Auth on the
+server, so it has to be turned off on the Supabase project itself:
+
+1. In your Supabase project, go to **Authentication → Providers** (or
+   **Authentication → Sign In / Providers** on newer dashboards).
+2. Open the **Email** provider.
+3. Turn **Confirm email** off, then save.
+
+With this off, `supabase.auth.signUp()` returns an active session straight
+away, and the app (see `signUp()` in
+[`src/screens/SignInScreen.svelte`](./src/screens/SignInScreen.svelte))
+already detects that automatically and takes the new user straight to the
+main screen — no app changes or redeploy needed.
+
+This is a project-wide setting: it applies to every user signing up on that
+Supabase project, since Supabase doesn't offer a per-user opt-out. If you
+want confirmation required for most users but skippable for a few, you'd
+need a server-side component (e.g. a Supabase Edge Function using the
+service-role key to force-confirm specific accounts) — outside the scope of
+this static, backend-less app.
+
+### 3. Configure credentials (optional — recommended for local dev)
 
 Instead of entering credentials in the browser Config screen every time, you can supply them via a `.env` file:
 
@@ -45,7 +73,7 @@ Vite automatically loads `.env` during `npm run dev` and `npm run build`. When t
 
 > **Note:** `.env` is listed in `.gitignore` — your secrets will never be committed. The checked-in `.env.template` contains only placeholder values and serves as documentation.
 
-### 3. Run locally
+### 4. Run locally
 
 ```bash
 npm install
@@ -54,7 +82,7 @@ npm run dev
 
 Open http://localhost:5173/working-hours-counter/ — if you filled in `.env` you will land directly on the sign-in screen.
 
-### 4. Deploy to GitHub Pages
+### 5. Deploy to GitHub Pages
 
 ```bash
 npm run deploy
