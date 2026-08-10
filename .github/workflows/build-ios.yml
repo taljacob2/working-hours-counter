@@ -3,7 +3,7 @@ name: Build iOS App (Simulator)
 on:
   push:
     branches:
-      - add-ios-platform
+      - master
   workflow_dispatch:
 
 jobs:
