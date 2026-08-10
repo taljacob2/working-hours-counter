@@ -11,8 +11,8 @@ export const minimumDailyHours = writable(5)
 export const maximumDailyHours = writable(12)
 export const commuteGapMinutes = writable(45)
 export const use24HourFormat = writable(true)
-// Days of week that are off (0=Sun, 1=Mon, ..., 6=Sat). Default: Sat+Sun.
-export const offDays = writable([0, 6])
+// Days of week that are off (0=Sun, 1=Mon, ..., 6=Sat). Default: Fri+Sat.
+export const offDays = writable([5, 6])
 // Max rebalance history entries per month kept in Supabase. 0 = unlimited.
 export const rebalHistoryCap = writable(0)
 // Per-date overrides: { 'YYYY-MM-DD': 'work' | 'off' }. Takes precedence over offDays.

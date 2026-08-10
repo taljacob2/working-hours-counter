@@ -157,8 +157,8 @@
 
       const offDaysVal = settings?.find(s => s.key === 'offDays')?.value
       const offDaysLocal = localStorage.getItem('whl_off_days')
-      const offDaysRaw = offDaysVal ?? offDaysLocal ?? '[0,6]'
-      try { offDays.set(JSON.parse(offDaysRaw)) } catch { offDays.set([0, 6]) }
+      const offDaysRaw = offDaysVal ?? offDaysLocal ?? '[5,6]'
+      try { offDays.set(JSON.parse(offDaysRaw)) } catch { offDays.set([5, 6]) }
 
       const dayOverridesVal = settings?.find(s => s.key === 'dayOverrides')?.value
       const dayOverridesLocal = localStorage.getItem('whl_day_overrides')

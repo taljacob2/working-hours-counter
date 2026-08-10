@@ -64,7 +64,7 @@ async function processUser(userId, subs, today, hour, minute, now) {
   const deliverVia = s.notifDeliverVia || 'both'
   if (deliverVia === 'native') { console.log(`[${userId}] notifDeliverVia=native — nothing to do`); return }
 
-  const offDaysArr = JSON.parse(s.offDays || '[0,6]')
+  const offDaysArr = JSON.parse(s.offDays || '[5,6]')
   const dayOverridesObj = JSON.parse(s.dayOverrides || '{}')
   const requiredDailyHours = parseFloat(s.requiredDailyHours || '9')
   const todaysOff = isOffDay(today, offDaysArr, dayOverridesObj)
