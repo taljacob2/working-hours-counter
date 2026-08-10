@@ -3,7 +3,7 @@
 // Authentication > Providers. Flip a provider to `true` once both sides are
 // configured.
 export const OAUTH_PROVIDERS = {
-  google: false,
+  google: true,
   github: true,
 }
 
