@@ -1,6 +1,7 @@
 <script>
   import { initSupabase } from '../lib/supabase.js'
   import { screen, loading, showToast } from '../stores/appStore.js'
+  import PasswordVisibilityToggle from '../components/PasswordVisibilityToggle.svelte'
 
   let url = localStorage.getItem('whl_sb_url') || ''
   let key = localStorage.getItem('whl_sb_key') || ''
@@ -135,7 +136,7 @@ grant select, insert, update, delete on table public.rebalance_history to anon, 
         <label for="cfg-key">Anon (public) Key</label>
         <div class="input-wrap">
           <input id="cfg-key" type={showKey ? 'text' : 'password'} bind:value={key} placeholder="eyJ…" required autocomplete="off" />
-          <button type="button" class="show-btn" on:click={() => showKey = !showKey}>{showKey ? '🙈' : '👁️'}</button>
+          <PasswordVisibilityToggle visible={showKey} on:click={() => showKey = !showKey} />
         </div>
         <span class="hint">Find these in Supabase Dashboard → Project Settings → API</span>
       </div>
@@ -177,7 +178,6 @@ grant select, insert, update, delete on table public.rebalance_history to anon, 
   pre { padding: 0.75rem; font-size: 0.72rem; line-height: 1.5; overflow-x: auto; color: var(--color-text); background: var(--color-bg); max-height: 180px; }
   .input-wrap { position: relative; }
   .input-wrap input { padding-right: 2.5rem; }
-  .show-btn { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0.25rem; }
   .hint { font-size: 0.75rem; color: var(--color-text-muted); margin-top: 4px; display: block; }
   .form-error { color: var(--color-ot-neg); font-size: 0.875rem; margin-top: 0.5rem; }
 </style>

@@ -3,6 +3,7 @@
   import { screen, user, logs, requiredHours, minimumDailyHours, use24HourFormat, loading, showToast } from '../stores/appStore.js'
   import { byTs } from '../lib/timeUtils.js'
   import { OAUTH_PROVIDERS, hasEnabledOAuthProvider } from '../lib/authProviders.js'
+  import PasswordVisibilityToggle from '../components/PasswordVisibilityToggle.svelte'
 
   let email = ''
   let password = ''
@@ -10,6 +11,7 @@
   let info = ''
   let busy = false
   let mode = 'signin' // 'signin' | 'signup'
+  let showPassword = false
 
   function switchMode(next) {
     mode = next
@@ -126,7 +128,10 @@
       </div>
       <div class="field">
         <label for="si-password">Password</label>
-        <input id="si-password" type="password" bind:value={password} placeholder="••••••••" required autocomplete={mode === 'signup' ? 'new-password' : 'current-password'} minlength={mode === 'signup' ? 6 : undefined} />
+        <div class="password-input-wrap">
+          <input id="si-password" type={showPassword ? 'text' : 'password'} bind:value={password} placeholder="••••••••" required autocomplete={mode === 'signup' ? 'new-password' : 'current-password'} minlength={mode === 'signup' ? 6 : undefined} />
+          <PasswordVisibilityToggle visible={showPassword} on:click={() => showPassword = !showPassword} />
+        </div>
       </div>
       {#if error}<p class="form-error">⚠️ {error}</p>{/if}
       {#if info}<p class="form-info">✅ {info}</p>{/if}
@@ -192,6 +197,8 @@
   .auth-logo { font-size: 2.5rem; text-align: center; margin-bottom: 0.75rem; }
   h1 { text-align: center; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.375rem; }
   .auth-subtitle { text-align: center; color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .password-input-wrap { position: relative; }
+  .password-input-wrap input { padding-right: 2.25rem; }
   .form-error { color: var(--color-ot-neg); font-size: 0.875rem; margin-top: 0.5rem; }
   .form-info { color: var(--color-primary); font-size: 0.875rem; margin-top: 0.5rem; }
   .oauth-divider {
