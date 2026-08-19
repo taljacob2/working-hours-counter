@@ -637,17 +637,13 @@
   }
 
   function reconfigure() {
-    if (import.meta.env.NEXT_PUBLIC_SUPABASE_URL) {
-      showToast('Config is locked to Environment Variables', 'info')
-      return
-    }
     localStorage.removeItem('whl_sb_url')
     localStorage.removeItem('whl_sb_key')
     screen.set('config')
   }
 
   const maskedUrl = (() => {
-    const raw = import.meta.env.NEXT_PUBLIC_SUPABASE_URL || localStorage.getItem('whl_sb_url') || ''
+    const raw = localStorage.getItem('whl_sb_url') || ''
     return raw.length > 30 ? raw.slice(0, 20) + '…' + raw.slice(-10) : raw
   })()
 </script>
@@ -1153,7 +1149,9 @@
   </CollapsibleSection>
 
   <CollapsibleSection title="Account &amp; Connection" icon="👤">
-    <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
+    {#if !import.meta.env.NEXT_PUBLIC_SUPABASE_URL}
+      <p class="info-text">Supabase project: <code>{maskedUrl}</code></p>
+    {/if}
 
     {#if hasEnabledOAuthProvider}
       <p class="info-text" style="margin-top:1rem;">Linked sign-in methods</p>
@@ -1180,7 +1178,9 @@
     {/if}
 
     <div class="account-actions">
-      <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
+      {#if !import.meta.env.NEXT_PUBLIC_SUPABASE_URL}
+        <button class="btn btn-secondary" style="flex:1" on:click={reconfigure}>🔧 Reconfigure</button>
+      {/if}
       <button class="btn btn-danger" style="flex:1" on:click={signOut}>🚪 Sign out</button>
     </div>
 

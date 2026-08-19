@@ -170,12 +170,14 @@
       {/if}
     </p>
 
-    <p class="reconfigure-hint">
-      Wrong project?
-      <button class="link-btn" on:click={() => { localStorage.removeItem('whl_sb_url'); localStorage.removeItem('whl_sb_key'); screen.set('config') }}>
-        Reconfigure
-      </button>
-    </p>
+    {#if !import.meta.env.NEXT_PUBLIC_SUPABASE_URL}
+      <p class="reconfigure-hint">
+        Wrong project?
+        <button class="link-btn" on:click={() => { localStorage.removeItem('whl_sb_url'); localStorage.removeItem('whl_sb_key'); screen.set('config') }}>
+          Reconfigure
+        </button>
+      </p>
+    {/if}
   </div>
 </div>
 
