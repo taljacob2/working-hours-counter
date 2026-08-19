@@ -8,6 +8,7 @@
 
   import Spinner     from './components/Spinner.svelte'
   import Toast       from './components/Toast.svelte'
+  import InstallBanner from './components/InstallBanner.svelte'
   import TopBar      from './components/TopBar.svelte'
   import ConfigScreen   from './screens/ConfigScreen.svelte'
   import SignInScreen   from './screens/SignInScreen.svelte'
@@ -244,6 +245,9 @@
 
 <Spinner />
 <Toast />
+{#if $screen !== 'loading'}
+  <InstallBanner />
+{/if}
 
 {#if $screen === 'loading'}
   <!-- intentionally blank — Spinner overlay is shown -->

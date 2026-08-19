@@ -1,6 +1,7 @@
 import './app.css'
 import App from './App.svelte'
 import { mount } from 'svelte'
+import { initInstallPrompt } from './lib/installPrompt.js'
 
 const app = mount(App, { target: document.getElementById('app') })
 
@@ -9,5 +10,7 @@ const app = mount(App, { target: document.getElementById('app') })
 if (!window.Capacitor?.isNativePlatform?.() && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(console.warn)
 }
+
+if (!window.Capacitor?.isNativePlatform?.()) initInstallPrompt()
 
 export default app
