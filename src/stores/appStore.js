@@ -15,6 +15,10 @@ export const use24HourFormat = writable(true)
 export const offDays = writable([5, 6])
 // Max rebalance history entries per month kept in Supabase. 0 = unlimited.
 export const rebalHistoryCap = writable(0)
+// Top of the "rebalance straightness randomness" range, in minutes (0-15). The rebalance
+// algorithm nudges each day by a random amount up to ± this many minutes so results don't
+// land on suspiciously round numbers, while keeping the month's total OT unchanged.
+export const rebalRandomnessMinutes = writable(5)
 // Per-date overrides: { 'YYYY-MM-DD': 'work' | 'off' }. Takes precedence over offDays.
 export const dayOverrides = writable({})
 

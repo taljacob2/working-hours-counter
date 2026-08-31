@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, rebalHistoryCap } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, rebalHistoryCap, rebalRandomnessMinutes } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -369,6 +369,103 @@
     return map
   })()
 
+  // ── Rebalance straightness randomness ───────────────────────
+  // Rebalancing normally straightens donor/recipient days to exact, suspiciously round
+  // numbers (e.g. exactly the required hours). This nudges each transfer by a small random
+  // amount — up to the configured range — so results look like natural human variance.
+  // The jitters always sum to exactly zero across the affected days, so the month's total
+  // OT is never shifted: this only redistributes a few minutes' worth of "noise" among the
+  // same donors/recipients the straight rebalance already picked, it never invents drift.
+  function computeStraightnessJitter(baseMap, dayInfo, minMs, maxMs, topMinutes) {
+    const keys = Object.keys(baseMap).filter(k => baseMap[k] !== 0)
+    if (topMinutes <= 0 || keys.length < 2) return {}
+    const topMs = Math.round(topMinutes * 60_000)
+    const floorMs = 60_000 // keep each day's own delta from crossing zero (donor turning recipient, etc.)
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+    const bounds = {}
+    const raw = {}
+    for (const k of keys) {
+      const base = baseMap[k]
+      let lo = base > 0 ? -Math.max(0, Math.min(topMs, base - floorMs)) : -topMs
+      let hi = base < 0 ?  Math.max(0, Math.min(topMs, -base - floorMs)) : topMs
+      const info = dayInfo[k]
+      if (info && !info.isOff) {
+        lo = Math.max(lo, minMs - info.netMs - base)
+        hi = Math.min(hi, maxMs - info.netMs - base)
+      }
+      if (hi < lo) { lo = 0; hi = 0 } // no safe room to jitter this day at all
+      bounds[k] = [lo, hi]
+      raw[k] = lo + Math.random() * (hi - lo)
+    }
+
+    // Water-fill a uniform shift t so sum(clamp(raw_i - t, lo_i, hi_i)) == 0 — same
+    // binary-search technique as the OT-cut water-filling above, centred on zero instead
+    // of a target amount so the redistribution nets out exactly.
+    let lo = -topMs * 2, hi = topMs * 2
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2
+      const sum = keys.reduce((s, k) => s + clamp(raw[k] - mid, bounds[k][0], bounds[k][1]), 0)
+      if (sum > 0) lo = mid; else hi = mid
+    }
+    const t = hi
+
+    const jitters = {}
+    let intSum = 0
+    for (const k of keys) {
+      const v = Math.round(clamp(raw[k] - t, bounds[k][0], bounds[k][1]))
+      jitters[k] = v
+      intSum += v
+    }
+    // Rounding to whole ms can leave a residual of a few ms — settle it on whichever key
+    // still has headroom so the total stays exactly zero.
+    if (intSum !== 0) {
+      const sorted = [...keys].sort((a, b) => {
+        const [loA, hiA] = bounds[a], [loB, hiB] = bounds[b]
+        const headroomA = intSum > 0 ? jitters[a] - loA : hiA - jitters[a]
+        const headroomB = intSum > 0 ? jitters[b] - loB : hiB - jitters[b]
+        return headroomB - headroomA
+      })
+      let residual = intSum
+      for (const k of sorted) {
+        if (residual === 0) break
+        const [kLo, kHi] = bounds[k]
+        const step = residual > 0 ? -1 : 1
+        const next = jitters[k] + step
+        if (next < kLo || next > kHi) continue
+        jitters[k] = next
+        residual += step
+      }
+    }
+    return jitters
+  }
+
+  // Cached rather than a plain reactive `$:` block, since Math.random() inside a reactive
+  // statement would re-roll every recompute (e.g. the once-a-second clock tick) — flickering
+  // the preview and risking a different jitter being applied than the one shown. Only re-rolls
+  // when the actual transfer plan or the randomness/bounds settings change.
+  let straightnessJitterMap = {}
+  let _lastJitterSig = null
+  $: {
+    if (rebalancing && Object.keys(baseRebalMap).length) {
+      const sig = JSON.stringify(Object.entries(baseRebalMap).sort()) + '|' + $rebalRandomnessMinutes + '|' + $minimumDailyHours + '|' + $maximumDailyHours
+      if (sig !== _lastJitterSig) {
+        _lastJitterSig = sig
+        const minMs = $minimumDailyHours * 3_600_000
+        const maxMs = $maximumDailyHours * 3_600_000
+        const dayInfo = {}
+        for (const c of calDays) {
+          if (!c) continue
+          dayInfo[c.key] = { netMs: c.netMs, isOff: isOffDay(c.key, $offDays, $dayOverrides) }
+        }
+        straightnessJitterMap = computeStraightnessJitter(baseRebalMap, dayInfo, minMs, maxMs, $rebalRandomnessMinutes)
+      }
+    } else if (_lastJitterSig !== null) {
+      _lastJitterSig = null
+      straightnessJitterMap = {}
+    }
+  }
+
   // How much OT to actually cut this round, given the user's chosen ceiling.
   $: otCutAmountMs = (otCutEnabled && otCutCeilingMs != null) ? Math.max(0, cumOt - otCutCeilingMs) : 0
 
@@ -437,9 +534,12 @@
   // may be less than otCutAmountMs if home-loggable time can't cover the full request.
   $: otCutAchievableMs = Object.values(cutMap).reduce((s, v) => s - v, 0)
 
-  // Final per-cell delta map: normal rebalance + OT cut layered on top.
+  // Final per-cell delta map: normal rebalance + straightness jitter + OT cut layered on top.
+  // The OT cut deliberately targets an exact ceiling, so it's layered on raw (unjittered) —
+  // only the straight-rebalance portion gets randomized.
   $: rebalMap = (() => {
     const map = { ...baseRebalMap }
+    for (const [k, v] of Object.entries(straightnessJitterMap)) map[k] = (map[k] ?? 0) + v
     for (const [k, v] of Object.entries(cutMap)) map[k] = (map[k] ?? 0) + v
     return map
   })()

@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, rebalRandomnessMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -195,6 +195,9 @@
 
       const rebalCapVal = settings?.find(s => s.key === 'rebalHistoryCap')?.value
       rebalHistoryCap.set(parseInt(rebalCapVal ?? localStorage.getItem('whl_rebal_history_cap') ?? '0', 10))
+
+      const rebalRandVal = settings?.find(s => s.key === 'rebalRandomnessMinutes')?.value
+      rebalRandomnessMinutes.set(parseInt(rebalRandVal ?? localStorage.getItem('whl_rebal_randomness') ?? '5', 10))
 
       const nme = settings?.find(s => s.key === 'notifMorningEnabled')?.value
       notifMorningEnabled.set((nme ?? localStorage.getItem('whl_notif_morning') ?? 'false') === 'true')

@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, rebalRandomnessMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
   import { requestNotificationPermission, isPushSupported, getPushSubscriptionStatus, subscribeToPush, unsubscribeFromPush } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
@@ -33,6 +33,9 @@
 
   let rebalHistoryCapLocal = 0
   rebalHistoryCap.subscribe(v => rebalHistoryCapLocal = v)
+
+  let rebalRandomnessLocal = 5
+  rebalRandomnessMinutes.subscribe(v => rebalRandomnessLocal = v)
 
   let companyNameLocal = ''
   companyName.subscribe(v => companyNameLocal = v)
@@ -175,6 +178,9 @@
     rebalHistoryCap.set(rebalHistoryCapLocal)
     localStorage.setItem('whl_rebal_history_cap', String(rebalHistoryCapLocal))
 
+    rebalRandomnessMinutes.set(rebalRandomnessLocal)
+    localStorage.setItem('whl_rebal_randomness', String(rebalRandomnessLocal))
+
     companyName.set(companyNameLocal)
     localStorage.setItem('whl_company_name', companyNameLocal)
     employeeName.set(employeeNameLocal)
@@ -224,6 +230,7 @@
       { key: 'use24HourFormat', value: String(use24Local) },
       { key: 'offDays', value: JSON.stringify(offDaysLocal) },
       { key: 'rebalHistoryCap', value: String(rebalHistoryCapLocal) },
+      { key: 'rebalRandomnessMinutes', value: String(rebalRandomnessLocal) },
       { key: 'notifMorningEnabled', value: String(notifMorningEnabledLocal) },
       { key: 'notifMorningTime',    value: notifMorningTimeLocal },
       { key: 'notifEveningEnabled', value: String(notifEveningEnabledLocal) },
@@ -773,6 +780,26 @@
       </div>
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
         How many applied rebalances to remember per month. Set to 0 for unlimited. Older entries are pruned automatically when the limit is exceeded.
+      </p>
+    </div>
+
+    <div style="margin-top: 1.5rem">
+      <label>Rebalance Straightness Randomness Range</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="rebal-rand-slider" type="range" min="0" max="15" step="1"
+          bind:value={rebalRandomnessLocal}
+          on:input={e => rebalRandomnessLocal = parseInt(e.target.value)}
+          style="flex:1"
+        />
+        <input id="rebal-rand-num" type="number" min="0" max="15" step="1"
+          bind:value={rebalRandomnessLocal}
+          on:input={e => rebalRandomnessLocal = Math.min(15, Math.max(0, parseInt(e.target.value) || 0))}
+          style="width:80px"
+        />
+        <span class="hours-label">0 – {rebalRandomnessLocal} min</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        Rebalancing normally straightens days to land exactly on your required hours, which can look robotic. This adds a random ± up to {rebalRandomnessLocal} minute{rebalRandomnessLocal === 1 ? '' : 's'} of variance per day so results look more natural — the total month overtime is never affected, only how it's distributed across days. Set to 0 to disable.
       </p>
     </div>
 
