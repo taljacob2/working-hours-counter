@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, rebalRandomnessMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, logs, screen, user, showToast, loading, officeLocations, activeOfficeId, autoTrackEnabled, rebalHistoryCap, rebalRandomnessMinutes, rebalMinHomeSessionMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from '../stores/appStore.js'
   import { requestNotificationPermission, isPushSupported, getPushSubscriptionStatus, subscribeToPush, unsubscribeFromPush } from '../lib/notifications.js'
   import { getSupabase } from '../lib/supabase.js'
   import { exportCsv, saveFile } from '../lib/exportUtils.js'
@@ -36,6 +36,9 @@
 
   let rebalRandomnessLocal = 5
   rebalRandomnessMinutes.subscribe(v => rebalRandomnessLocal = v)
+
+  let rebalMinSessionLocal = 15
+  rebalMinHomeSessionMinutes.subscribe(v => rebalMinSessionLocal = v)
 
   let companyNameLocal = ''
   companyName.subscribe(v => companyNameLocal = v)
@@ -181,6 +184,9 @@
     rebalRandomnessMinutes.set(rebalRandomnessLocal)
     localStorage.setItem('whl_rebal_randomness', String(rebalRandomnessLocal))
 
+    rebalMinHomeSessionMinutes.set(rebalMinSessionLocal)
+    localStorage.setItem('whl_rebal_min_session', String(rebalMinSessionLocal))
+
     companyName.set(companyNameLocal)
     localStorage.setItem('whl_company_name', companyNameLocal)
     employeeName.set(employeeNameLocal)
@@ -231,6 +237,7 @@
       { key: 'offDays', value: JSON.stringify(offDaysLocal) },
       { key: 'rebalHistoryCap', value: String(rebalHistoryCapLocal) },
       { key: 'rebalRandomnessMinutes', value: String(rebalRandomnessLocal) },
+      { key: 'rebalMinHomeSessionMinutes', value: String(rebalMinSessionLocal) },
       { key: 'notifMorningEnabled', value: String(notifMorningEnabledLocal) },
       { key: 'notifMorningTime',    value: notifMorningTimeLocal },
       { key: 'notifEveningEnabled', value: String(notifEveningEnabledLocal) },
@@ -800,6 +807,26 @@
       </div>
       <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
         Rebalancing normally straightens days to land exactly on your required hours, which can look robotic. This adds a random ± up to {rebalRandomnessLocal} minute{rebalRandomnessLocal === 1 ? '' : 's'} of variance per day so results look more natural — the total month overtime is never affected, only how it's distributed across days. Set to 0 to disable.
+      </p>
+    </div>
+
+    <div style="margin-top: 1.5rem">
+      <label>Minimum Home Session Length</label>
+      <div class="hours-row" style="margin-top: 0.25rem">
+        <input id="rebal-min-sess-slider" type="range" min="0" max="60" step="1"
+          bind:value={rebalMinSessionLocal}
+          on:input={e => rebalMinSessionLocal = parseInt(e.target.value)}
+          style="flex:1"
+        />
+        <input id="rebal-min-sess-num" type="number" min="0" max="60" step="1"
+          bind:value={rebalMinSessionLocal}
+          on:input={e => rebalMinSessionLocal = Math.min(60, Math.max(0, parseInt(e.target.value) || 0))}
+          style="width:80px"
+        />
+        <span class="hours-label">min</span>
+      </div>
+      <p class="info-text" style="margin-top: 0.5rem; font-size: 0.8rem">
+        Rebalancing won't trim a home session down to a sliver or create a new one shorter than this — a session that would end up too short is deleted or skipped entirely instead. Set to 0 to disable.
       </p>
     </div>
 

@@ -4,7 +4,7 @@
   import { getSupabase } from '../lib/supabase.js'
   import { fmtDuration, dateKey, computeNetMs, computeTotalMs, byTs,
            loggedDaysInMonth, monthBounds, monthCumulativeOtMs, isOffDay } from '../lib/timeUtils.js'
-  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, rebalHistoryCap, rebalRandomnessMinutes } from '../stores/appStore.js'
+  import { requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, offDays, dayOverrides, rebalHistoryCap, rebalRandomnessMinutes, rebalMinHomeSessionMinutes } from '../stores/appStore.js'
 
   // Live clock for open-ended spans
   let now = new Date()
@@ -474,13 +474,13 @@
   // the day's theoretical OT — a lot of that can be office-sourced (never touched) or split
   // across sessions too small to fully satisfy a big ask, so this simulates the real cap
   // rather than trusting the theoretical number.
-  function achievableCutForDay(dk, netMs, reqMs, maxMs, commuteGapMins) {
+  function achievableCutForDay(dk, netMs, reqMs, maxMs, commuteGapMins, minSessionMs) {
     const theoretical = netMs - reqMs
     if (theoretical <= 0) return 0
     const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
     if (!dayLogs.length) return 0
     const synthetic = { stillAboveMax: [], excessOtRecipients: new Set() }
-    const sugg = computeDaySuggestion(dayLogs, dk, synthetic, { [dk]: -theoretical }, maxMs, commuteGapMins, netMs)
+    const sugg = computeDaySuggestion(dayLogs, dk, synthetic, { [dk]: -theoretical }, maxMs, commuteGapMins, netMs, minSessionMs)
     return Math.abs(sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0)
   }
 
@@ -503,7 +503,7 @@
       .map(c => {
         const theoreticalAvail = Math.max(0, c.netMs - reqMs)
         if (theoreticalAvail <= 0) return { key: c.key, avail: 0 }
-        const achievable = achievableCutForDay(c.key, c.netMs, reqMs, maxMs, $commuteGapMinutes)
+        const achievable = achievableCutForDay(c.key, c.netMs, reqMs, maxMs, $commuteGapMinutes, $rebalMinHomeSessionMinutes * 60_000)
         return { key: c.key, avail: Math.min(theoreticalAvail, achievable) }
       })
       .filter(d => d.avail > 0)
@@ -579,7 +579,7 @@
       const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, baseRebalMap, maxMs, $commuteGapMinutes, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, baseRebalMap, maxMs, $commuteGapMinutes, netMs, $rebalMinHomeSessionMinutes * 60_000)
       achievable += Math.abs(sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0)
     }
     // Cap each recipient to at most what donors can actually deliver
@@ -617,7 +617,7 @@
       const dayLogs = effectiveLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, $commuteGapMinutes, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, $commuteGapMinutes, netMs, $rebalMinHomeSessionMinutes * 60_000)
       const delta = sugg ? simulateSuggestionDeltaMs(dayLogs, sugg) : 0
       const dayCell = calDays.find(c => c?.key === dk)
       const currentOt = dayCell?.otMs ?? 0
@@ -714,7 +714,7 @@
   }
 
   // Pure per-day suggestion function — called by the reactive and by applyAllRebalance
-  function computeDaySuggestion(sortedDayLogs, dateStr, rebalancing, rebalMap, maxMs, commuteGapMins, netMs) {
+  function computeDaySuggestion(sortedDayLogs, dateStr, rebalancing, rebalMap, maxMs, commuteGapMins, netMs, minSessionMs = 0) {
     if (!sortedDayLogs.length) return null
 
     const isStillAboveMax = rebalancing?.stillAboveMax?.includes(dateStr) ?? false
@@ -752,7 +752,9 @@
       const nextOffice = logsCopy.find(l => l.timestamp > openHomeResume.timestamp && l.platform === 'office')
       if (nextOffice) limitTs = new Date(nextOffice.timestamp).getTime() - (commuteGapMins * 60_000)
       const inc = Math.min(deltaMs, limitTs - curTs)
-      if (inc > 0) return { type: 'create_log', action: 'pause', newTs: new Date(curTs + inc).toISOString(), deltaMs: inc, isPartial: inc < deltaMs }
+      // inc is the resulting session's entire length (curTs is the open resume's own start) —
+      // skip rather than pause into a sliver shorter than the configured minimum.
+      if (inc > 0 && inc >= minSessionMs) return { type: 'create_log', action: 'pause', newTs: new Date(curTs + inc).toISOString(), deltaMs: inc, isPartial: inc < deltaMs }
     }
 
     const getBenefit = (oldTs, newTs) => {
@@ -774,8 +776,13 @@
               if (needed >= sessionMs) {
                 candidates.push({ isDeleteSession: true, resumeLogId: prev.id, pauseLogId: log.id, sessionDurationMs: sessionMs, appliedRed: sessionMs, isPartial: needed > sessionMs })
               } else {
-                const newTsIso = new Date(new Date(log.timestamp).getTime() - needed).toISOString()
-                candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: false, appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso) })
+                // Never trim a session down to less than the configured minimum — cap the
+                // reduction at whatever leaves exactly the floor, and mark the shortfall partial.
+                const appliedRed = Math.min(needed, Math.max(0, sessionMs - minSessionMs))
+                if (appliedRed > 0) {
+                  const newTsIso = new Date(new Date(log.timestamp).getTime() - appliedRed).toISOString()
+                  candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: appliedRed, isPartial: appliedRed < needed, appliedRed, benefit: getBenefit(log.timestamp, newTsIso) })
+                }
               }
             }
           }
@@ -787,8 +794,11 @@
               if (needed >= sessionMs) {
                 candidates.push({ isDeleteSession: true, resumeLogId: log.id, pauseLogId: next.id, sessionDurationMs: sessionMs, appliedRed: sessionMs, isPartial: needed > sessionMs })
               } else {
-                const newTsIso = new Date(new Date(log.timestamp).getTime() + needed).toISOString()
-                candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: needed, isPartial: false, appliedRed: needed, benefit: getBenefit(log.timestamp, newTsIso) })
+                const appliedRed = Math.min(needed, Math.max(0, sessionMs - minSessionMs))
+                if (appliedRed > 0) {
+                  const newTsIso = new Date(new Date(log.timestamp).getTime() + appliedRed).toISOString()
+                  candidates.push({ logId: log.id, originalTs: log.timestamp, newTs: newTsIso, deltaMs: appliedRed, isPartial: appliedRed < needed, appliedRed, benefit: getBenefit(log.timestamp, newTsIso) })
+                }
               }
             }
           }
@@ -829,12 +839,14 @@
       }
     }
 
-    if (deltaMs > 0) {
+    if (deltaMs > 0 && !openHomeResume) {
       const lastLog = logsCopy[logsCopy.length - 1]
       let startTs = new Date(dateStr + 'T17:00:00').getTime()
       if (lastLog) { startTs = new Date(lastLog.timestamp).getTime(); startTs += lastLog.platform === 'office' ? commuteGapMins * 60_000 : 60_000 }
       const limitTs = new Date(dateStr + 'T23:59:59').getTime()
       let endTs = Math.min(startTs + deltaMs, limitTs)
+      // Skip rather than create a brand-new home session shorter than the configured minimum.
+      if (endTs - startTs < minSessionMs) return null
       return { type: 'create_block_logs', resumeTs: new Date(startTs).toISOString(), pauseTs: new Date(endTs).toISOString(), deltaMs: endTs - startTs, isPartial: startTs + deltaMs > limitTs }
     }
 
@@ -847,7 +859,7 @@
 
   // Per-day log adjustment suggestion (thin reactive wrapper) — disabled in view mode
   $: logAdjustmentSuggestion = (showRebalancing && viewingEntryIdx === null && viewDayLogs.length > 0)
-    ? computeDaySuggestion([...viewDayLogs].sort(byTs), $selectedDate, rebalancing, effectiveRebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs)
+    ? computeDaySuggestion([...viewDayLogs].sort(byTs), $selectedDate, rebalancing, effectiveRebalMap, $maximumDailyHours * 3_600_000, $commuteGapMinutes, selNetMs, $rebalMinHomeSessionMinutes * 60_000)
     : null
 
   // Unified sorted table rows: existing logs interleaved with suggestion rows
@@ -995,6 +1007,7 @@
     if (!rebalancing || !showRebalancing || viewingEntryIdx !== null) return
     const maxMs = $maximumDailyHours * 3_600_000
     const commuteGapMins = $commuteGapMinutes
+    const minSessionMs = $rebalMinHomeSessionMinutes * 60_000
     const otBefore = cumOt
 
     const affectedKeys = new Set([...Object.keys(rebalMap), ...(rebalancing.stillAboveMax || [])])
@@ -1010,7 +1023,7 @@
       const dayLogs = currentLogs.filter(l => l.date_key === dk).sort(byTs)
       if (!dayLogs.length) continue
       const netMs = computeNetMs(dayLogs)
-      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, commuteGapMins, netMs)
+      const sugg = computeDaySuggestion(dayLogs, dk, rebalancing, effectiveRebalMap, maxMs, commuteGapMins, netMs, minSessionMs)
       if (!sugg) continue
 
       const base = { platform: 'home', date_key: dk }

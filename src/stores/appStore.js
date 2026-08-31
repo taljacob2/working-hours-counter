@@ -19,6 +19,10 @@ export const rebalHistoryCap = writable(0)
 // algorithm nudges each day by a random amount up to ± this many minutes so results don't
 // land on suspiciously round numbers, while keeping the month's total OT unchanged.
 export const rebalRandomnessMinutes = writable(5)
+// Shortest home session (resume→pause) rebalancing is allowed to leave behind or create, in
+// minutes. Prevents unnaturally tiny slivers (e.g. a 5-minute home stint) when a day's target
+// delta is small. 0 disables the floor entirely.
+export const rebalMinHomeSessionMinutes = writable(15)
 // Per-date overrides: { 'YYYY-MM-DD': 'work' | 'off' }. Takes precedence over offDays.
 export const dayOverrides = writable({})
 

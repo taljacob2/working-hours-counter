@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, rebalRandomnessMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
+  import { screen, user, logs, requiredHours, minimumDailyHours, maximumDailyHours, commuteGapMinutes, use24HourFormat, loading, theme, offDays, dayOverrides, officeLocations, activeOfficeId, officeLocation, autoTrackEnabled, showToast, rebalHistoryCap, rebalRandomnessMinutes, rebalMinHomeSessionMinutes, notifMorningEnabled, notifMorningTime, notifEveningEnabled, notifEveningTime, notifTargetEnabled, notifTargetHoursOverride, notifDeliverVia, excelColorHomeHours, fillMissingOfficeHours, companyName, employeeName, employeeCode, cardNumber, payrollNumber, employmentStartDate, workAgreementText } from './stores/appStore.js'
   import { initSupabase, getSupabase } from './lib/supabase.js'
   import { GeoFenceWatcher } from './lib/geoFence.js'
   import { dateKey } from './lib/timeUtils.js'
@@ -198,6 +198,9 @@
 
       const rebalRandVal = settings?.find(s => s.key === 'rebalRandomnessMinutes')?.value
       rebalRandomnessMinutes.set(parseInt(rebalRandVal ?? localStorage.getItem('whl_rebal_randomness') ?? '5', 10))
+
+      const rebalMinSessVal = settings?.find(s => s.key === 'rebalMinHomeSessionMinutes')?.value
+      rebalMinHomeSessionMinutes.set(parseInt(rebalMinSessVal ?? localStorage.getItem('whl_rebal_min_session') ?? '15', 10))
 
       const nme = settings?.find(s => s.key === 'notifMorningEnabled')?.value
       notifMorningEnabled.set((nme ?? localStorage.getItem('whl_notif_morning') ?? 'false') === 'true')
